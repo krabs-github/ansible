@@ -1,3 +1,9 @@
-- hosts: all
-    - name: Update Pihole
+---
+- name: Update PiHole
+  hosts: all
+
+  become: true
+
+  tasks:
+    - name: Update PiHole
       command: echo "pihole -up"
