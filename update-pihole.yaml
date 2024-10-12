@@ -6,7 +6,7 @@
 
   tasks:
     - name: Update PiHole
-      command: echo "pihole -up"
+      command: pihole -up
 
     - name: Update Gravity
-      command: echo "pihole updateGravity"
+      command: pihole updateGravity
