@@ -7,7 +7,6 @@
   tasks:
     - name: test cmd
       ansible.builtin.shell: 
-      cmd: ls -l /krabs-data > test.txt
-      chdir: /krabs-data
+      cmd: ls -l /krabs-data > /krabs-data/test.txt
       args:
         executable: /bin/bash
