@@ -1,0 +1,11 @@
+---
+- name: Test Script
+  hosts: all
+
+  #become: true
+  
+  ansible.builtin.shell:
+    cmd: ls -l
+    chdir: /krabs-data
+    args:
+    executable: /bin/bash
