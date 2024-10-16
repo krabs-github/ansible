@@ -1,6 +1,11 @@
 ---
-  #become: true
+- name: Testing Script
+  hosts: all
+
+  become: true
+
   tasks:
-    ansible.builtin.shell: ls -l /krabs-docker/
-    args:
-      executable: /bin/bash
+    - name: test cmd
+      ansible.builtin.shell: ls -l /krabs-docker/
+      args:
+        executable: /bin/bash
