@@ -4,7 +4,6 @@
 
   #become: true
   tasks:
-    ansible.builtin.shell:
-      cmd: ls -l
-      chdir: /krabs-data
+    ansible.builtin.shell: ls -l /krabs-docker/
+    args:
       executable: /bin/bash
