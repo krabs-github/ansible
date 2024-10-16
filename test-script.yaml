@@ -1,7 +1,4 @@
 ---
-- name: Test Script
-  hosts: all
-
   #become: true
   tasks:
     ansible.builtin.shell: ls -l /krabs-docker/
