@@ -6,6 +6,6 @@
 
   tasks:
     - name: test cmd
-      ansible.builtin.shell: ls -l /krabs-data > /krabs-data/test.txt
+      ansible.builtin.shell: curl -o /krabs-data/krabs-scripts/ansible/alert_disk_space.sh https://raw.githubusercontent.com/krabs-github/ansible/refs/heads/main/alert_disk_space.sh && chmod 755 /krabs-data/krabs-scripts/ansible/alert_disk_space.sh && /krabs-data/krabs-scripts/ansible/alert_disk_space.sh
       args:
         executable: /bin/bash
