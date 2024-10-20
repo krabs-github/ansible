@@ -20,7 +20,7 @@ fNTFY ()
     fi
 }
 #--------------------------------
-vDisk_Usage_Above_90="$(df -h --output=pcent,used,source | grep 9[0-9]%)"
+vDisk_Usage_Above_90="$(df -h --output=pcent,used,source | grep 1[0-9]%)"
 if [ ! "${vDisk_Usage_Above_90}" = "" ]
     then
         fNTFY "Alerts" "Disk Usage on ${vHostname} is >90%" "red_square" "high" "${vDisk_Usage_Above_90}"
