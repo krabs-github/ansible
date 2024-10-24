@@ -1,6 +1,7 @@
 #!/bin/bash
 vScript_Name="${0##*/}"
 vScript_Working_Directory="$(echo $PWD)"
+vScript_Log_File="${vScript_Working_Directory}/${vScript_Name}.log"
 vDate_Text_Display="$(date '+%m-%d-%Y')"
 vDate_Name_Compatible="$(date '+%Y%m%d')"
 vTime_Text_Display="$(date '+%r')"
@@ -23,7 +24,8 @@ fNTFY ()
 vDisk_Usage_Above_90="$(df -h --output=pcent,used,source | grep 9[0-9]%)"
 if [ ! "${vDisk_Usage_Above_90}" = "" ]
     then
-        fNTFY "Alerts" "Disk Usage on ${vHostname} is >90%" "red_square" "high" "${vDisk_Usage_Above_90}"
+        fNTFY "Alerts" "Disk Usage on ${vHostname} is >90%" "red_square,computer" "high" "${vDisk_Usage_Above_90}"
 fi
 #--------------------------------
+touch ${vScript_Log_File}
 exit 0
