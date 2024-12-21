@@ -1,3 +1,4 @@
+---
 - name: Check if reboot required
   stat:
     path: /var/run/reboot-required
