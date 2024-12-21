@@ -4,7 +4,7 @@
   stat: path=/var/run/reboot-required
   register: check_reboot
 
-I then check that register with Meta so that I only reboot the machine when it is needed
+# I then check that register with Meta so that I only reboot the machine when it is needed
 
 # Ends playbook if the file DOES NOT exist
 - meta: end_host
