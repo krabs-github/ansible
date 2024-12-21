@@ -1,0 +1,19 @@
+---
+# Restart required?
+- name: check if reboot is needed
+stat: path=/var/run/reboot-required
+register: check_reboot
+
+I then check that register with Meta so that I only reboot the machine when it is needed
+
+# Ends playbook if the file DOES NOT exist
+- meta: end_host
+when: not check_reboot.stat.exists
+
+# Initate system restart
+- name: reboot system
+reboot:
+msg: "Reboot initiated by Ansible due to system updates"
+pre_reboot_delay: 3600
+post_reboot_delay: 300
+reboot_timeout: 5400
