@@ -12,6 +12,4 @@
 
    - name: Reboot if required
      reboot:
-      async: 0
-      ignore_errors: yes
      when: reboot_required_file.stat.exists == true
