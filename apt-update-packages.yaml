@@ -32,6 +32,13 @@
         get_checksum: no
       register: reboot_required_file
 
+    - name: Send ntfy.sh update
+      uri:
+       url: "https://ntfy.krabs.me/Alerts"
+       method: POST
+       body: "{{ inventory_hostname }} is being rebooted."
+      when: reboot_required_file.stat.exists == true
+
     - name: Reboot the server (if required).
       ansible.builtin.reboot:
       when: reboot_required_file.stat.exists == true
