@@ -15,6 +15,7 @@
       url: "https://ntfy.krabs.me/Alerts"
       method: POST
       body: "{{ inventory_hostname }} is being rebooted."
+     when: reboot_required_file.stat.exists == true
 
    - name: Reboot if required
      reboot:
