@@ -9,7 +9,7 @@
       command: pihole updatePihole
 
     - name: Update Gravity
-      command: pihole updateGravity
+      command: pihole -g
 
     - name: Send ntfy.sh update
       uri:
