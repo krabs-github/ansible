@@ -10,9 +10,3 @@
 
     - name: Update Gravity
       command: pihole updateGravity
-
-    - name: Send ntfy.sh update
-      uri:
-       url: "https://ntfy.krabs.me/Alerts"
-       method: POST
-       body: "{{ inventory_hostname }} Pihole & Gravity updated."
