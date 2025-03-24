@@ -1,0 +1,11 @@
+---
+- name: Set System DNS
+  hosts: all
+
+  become: true
+
+  tasks:
+    - name: test cmd
+      ansible.builtin.shell: apt install curl -y && mkdir -p /krabs-data/krabs-scripts/ansible/ && cd /krabs-data/krabs-scripts/ansible/ && curl -o /krabs-data/krabs-scripts/ansible/set_dns_system.sh https://raw.githubusercontent.com/krabs-github/ansible/refs/heads/main/set_dns_system.sh && chmod 755 /krabs-data/krabs-scripts/ansible/set_dns_system.sh && /krabs-data/krabs-scripts/ansible/set_dns_system.sh
+      args:
+        executable: /bin/bash
