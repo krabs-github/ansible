@@ -1,11 +1,10 @@
 #!/bin/bash
 # Written by Shannon B. Hill
-# Usage: fNTFY <Topic> <Title> <Tags> <Priority> <Message>
 # Description: Function to send a notification to the ntfy.krabs.me service
 
 # Variables BEGIN --------------------------------------------------------------
 vScript_Name="${0##*/}"
-vScript_Working_Directory="$($PWD)"
+vScript_Working_Directory="$(pwd)"
 vDate_Text_Display="$(date '+%m-%d-%Y')"
 vDate_Name_Compatible="$(date '+%Y%m%d')"
 vTime_Text_Display="$(date '+%r')"
@@ -18,11 +17,13 @@ vNTFY_Host="https://ntfy.krabs.me"
 # FUNCTIONS BEGIN --------------------------------------------------------------
 fNTFY ()
 {
+    # Usage: fNTFY <Topic> <Title> <Tags> <Priority> <Message>
     if [ -z ${1} ] || [ -z ${2} ] || [ -z ${3} ] || [ -z ${4} ] || [ -z ${5} ]
         then
             echo "ERROR: Missing parameter to fNTFY function"
         else
             curl -d "${5}" -H "Title: ${2}" -H "Priority: ${4}" -H "Tags: ${3}" ${vNTFY_Host}/${1}
+    fi
 }
 
 fCleanLogs ()
@@ -44,4 +45,4 @@ fAptClean
 # Actions END ------------------------------------------------------------------
 
 # Exit -------------------------------------------------------------------------
-Exit 0
+exit 0
