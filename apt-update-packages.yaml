@@ -1,0 +1,58 @@
+---
+- name: Update and upgrade apt packages
+  hosts: all
+
+  become: true
+
+  tasks:
+    - name: Check for and remove potential apt locks
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if [ -f /var/lib/dpkg/lock ]; then
+          echo "Removing /var/lib/dpkg/lock"
+          rm -f /var/lib/dpkg/lock
+        fi
+        if [ -f /var/lib/dpkg/lock-frontend ]; then
+          echo "Removing /var/lib/dpkg/lock-frontend"
+          rm -f /var/lib/dpkg/lock-frontend
+        fi
+        if [ -f /var/lib/apt/lists/lock ]; then
+          echo "Removing /var/lib/apt/lists/lock"
+          rm -f /var/lib/apt/lists/lock
+        fi
+        if ps aux | grep -e '[a]pt-get' -e '[u]nattended-upgrade' | grep -v grep > /dev/null; then
+          echo "Killing active apt processes to release locks"
+          killall -9 apt-get || true
+          killall -9 unattended-upgrade || true
+        fi
+      when: ansible_pkg_mgr == 'apt'
+      changed_when: false # This task doesn't change system state in a way Ansible tracks
+
+    - name: Update packages with apt
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Upgrade packages with apt
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
+        upgrade: safe
+
+    - name: Check if a reboot is required.
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+        get_checksum: no
+      register: reboot_required_file
+
+    - name: Send ntfy.sh update
+      uri:
+       url: "https://ntfy.krabs.me/Alerts"
+       method: POST
+       body: "{{ inventory_hostname }} is being rebooted after system update."
+      when: reboot_required_file.stat.exists == true
+
+    - name: Reboot the server (if required).
+      ansible.builtin.reboot:
+      when: reboot_required_file.stat.exists == true
+
+    

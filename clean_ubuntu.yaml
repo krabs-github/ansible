@@ -1,0 +1,11 @@
+---
+- name: Clean Ubuntu
+  hosts: all
+
+  become: true
+
+  tasks:
+    - name: Clean Ubuntu
+      ansible.builtin.shell: apt install curl -y && mkdir -p /krabs-data/krabs-scripts/ansible/ && cd /krabs-data/krabs-scripts/ansible/ && curl -o /krabs-data/krabs-scripts/ansible/clean_ubuntu.sh https://raw.githubusercontent.com/krabs-github/ansible/refs/heads/main/clean_ubuntu.sh && chmod 755 /krabs-data/krabs-scripts/ansible/clean_ubuntu.sh && /krabs-data/krabs-scripts/ansible/clean_ubuntu.sh
+      args:
+        executable: /bin/bash

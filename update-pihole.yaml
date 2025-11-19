@@ -1,0 +1,18 @@
+---
+- name: Update PiHole
+  hosts: all
+
+  become: true
+
+  tasks:
+    - name: Update PiHole
+      command: pihole updatePihole
+
+    - name: Update Gravity
+      command: pihole updateGravity
+
+    - name: Send ntfy.sh update
+      uri:
+       url: "http://192.168.86.3:8001/Alerts"
+       method: POST
+       body: "{{ inventory_hostname }} Pihole & Gravity updated."

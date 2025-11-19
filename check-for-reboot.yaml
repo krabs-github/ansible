@@ -1,0 +1,22 @@
+---
+- name: Check for Reboot
+  hosts: all
+
+  become: true
+
+  tasks:
+   - name: Check if reboot required
+     stat:
+      path: /var/run/reboot-required
+     register: reboot_required_file
+
+   - name: Send ntfy.sh update
+     uri:
+      url: "https://ntfy.krabs.me/Alerts"
+      method: POST
+      body: "{{ inventory_hostname }} is being rebooted."
+     when: reboot_required_file.stat.exists == true
+
+   - name: Reboot if required
+     reboot:
+     when: reboot_required_file.stat.exists == true

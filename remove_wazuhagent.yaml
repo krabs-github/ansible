@@ -1,0 +1,23 @@
+---
+- name: Remove Wazuh Agent
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Stop Wazuh Agent service
+      ansible.builtin.systemd:
+        name: wazuh-agent
+        state: stopped
+        enabled: no
+      ignore_errors: true # Ignore errors if the service is already stopped or doesn't exist
+
+    - name: Remove Wazuh Agent package
+      ansible.builtin.apt:
+        name: wazuh-agent
+        state: absent
+        purge: true # Use purge to remove configuration files as well
+      register: apt_remove_result
+
+    - name: Display removal result
+      ansible.builtin.debug:
+        var: apt_remove_result
