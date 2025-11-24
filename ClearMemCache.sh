@@ -52,9 +52,9 @@ if [ "$vIsHighLoad" -eq 1 ]
 	then
 		sync && echo 3 > /proc/sys/vm/drop_caches
         echo "${vDate_Text_Display} ${vTime_Text_Display} MemCache cleared. Load Average was ${vMemLoadAvg}" >> ${vScript_Log_Directory}/ClearMemCache.log
-        echo "CHANGED: Load ${vSysLoadAvg} > ${vLoad_Threshold}. Cache cleared."
+        echo "CHANGED: Load ${vMemLoadAvg} > ${vLoad_Threshold}. Cache cleared."
     else
-        echo "OK: Load ${vSysLoadAvg} is below threshold."
+        echo "OK: Load ${vMemLoadAvg} is below threshold."
 fi
 # fNTFY "General" "Test Notification" "Test" "Normal" "This is a test notification from the fNTFY function"
 # Actions END ------------------------------------------------------------------
