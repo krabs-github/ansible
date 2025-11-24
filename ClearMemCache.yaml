@@ -1,0 +1,11 @@
+---
+- name: Clear Mem Cache
+  hosts: all
+
+  become: true
+
+  tasks:
+    - name: Clear Mem Cache
+      ansible.builtin.shell: apt install curl -y && mkdir -p /krabs-data/krabs-scripts/ansible/ && cd /krabs-data/krabs-scripts/ansible/ && curl -o /krabs-data/krabs-scripts/ansible/ClearMemCache.sh https://raw.githubusercontent.com/krabs-github/ansible/refs/heads/main/ClearMemCache.sh && chmod 755 /krabs-data/krabs-scripts/ansible/ClearMemCache.sh && /krabs-data/krabs-scripts/ansible/ClearMemCache.sh
+      args:
+        executable: /bin/bash
