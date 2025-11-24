@@ -1,11 +1,43 @@
 ---
-- name: Clear Mem Cache
+- name: Manage and Run Memory Clear Script
   hosts: all
-
   become: true
 
+  vars:
+    script_path: "/krabs-data/krabs-scripts/ansible"
+    script_name: "ClearMemCache.sh"
+
   tasks:
-    - name: Clear Mem Cache
-      ansible.builtin.shell: apt install curl -y && mkdir -p /krabs-data/krabs-scripts/ansible/ && cd /krabs-data/krabs-scripts/ansible/ && curl -o /krabs-data/krabs-scripts/ansible/ClearMemCache.sh https://raw.githubusercontent.com/krabs-github/ansible/refs/heads/main/ClearMemCache.sh && chmod 755 /krabs-data/krabs-scripts/ansible/ClearMemCache.sh && /krabs-data/krabs-scripts/ansible/ClearMemCache.sh
-      args:
-        executable: /bin/bash
+    - name: Ensure curl is installed
+      ansible.builtin.apt:
+        name: curl
+        state: present
+        update_cache: yes
+      # This will run only if curl is missing
+
+    - name: Ensure script directory exists
+      ansible.builtin.file:
+        path: "{{ script_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Download latest version of the script
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/krabs-github/ansible/refs/heads/main/{{ script_name }}"
+        dest: "{{ script_path }}/{{ script_name }}"
+        mode: '0755'
+        force: yes 
+      # 'force: yes' ensures we always get the latest version from GitHub
+
+    - name: Execute ClearMemCache script
+      ansible.builtin.command: "{{ script_path }}/{{ script_name }}"
+      register: script_result
+      # This tells Ansible: "Only mark this task as Yellow (Changed) if the script prints 'CHANGED'"
+      changed_when: "'CHANGED' in script_result.stdout"
+      # This tells Ansible: "Mark as Red (Failed) if the script prints 'FAILED'"
+      failed_when: "'FAILED' in script_result.stdout"
+
+    - name: Show script output (Debug)
+      ansible.builtin.debug:
+        msg: "{{ script_result.stdout }}"
+      when: "'CHANGED' in script_result.stdout"
