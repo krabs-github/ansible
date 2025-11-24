@@ -40,4 +40,3 @@
     - name: Show script output (Debug)
       ansible.builtin.debug:
         msg: "{{ script_result.stdout }}"
-      when: "'CHANGED' in script_result.stdout"
