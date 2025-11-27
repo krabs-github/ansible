@@ -24,7 +24,7 @@
         name: "{{ item }}"
         state: absent
         purge: true
-      loop: "{{ old_kernels.stdout_lines }}"
+      loop: "{{ old_kernels.stdout_lines | default([]) }}"
       when: old_kernels.stdout_lines | length > 0
       register: kernel_result
 
@@ -38,8 +38,8 @@
     - name: Vacuum systemd journal (keep 3 days)
       ansible.builtin.command: journalctl --vacuum-time=3d
       register: vacuum_output
-      # journalctl outputs the 'freed' message to stderr
-      changed_when: "'0B' not in vacuum_output.stderr"
+      # Using default('') prevents errors if stderr is missing
+      changed_when: "'0B' not in vacuum_output.stderr | default('')"
 
     # ---------------------------------------------------------
     # 3. REMOVE SNAPS
@@ -47,12 +47,16 @@
     - name: Remove disabled Snap revisions
       ansible.builtin.shell: |
         set -eu
-        # Find disabled snaps, remove them, and echo the result for counting
-        snap list --all | awk '/disabled/{print $1, $3}' |
-        while read snapname revision; do
-            snap remove "$snapname" --revision="$revision"
-            echo "Removed $snapname revision $revision"
-        done
+        # Check if snap command exists first to avoid shell errors
+        if command -v snap &> /dev/null; then
+            snap list --all | awk '/disabled/{print $1, $3}' |
+            while read snapname revision; do
+                snap remove "$snapname" --revision="$revision"
+                echo "Removed $snapname revision $revision"
+            done
+        else
+            echo "Snap not installed"
+        fi
       args:
         executable: /bin/bash
       register: snap_clean
@@ -76,17 +80,15 @@
     # ---------------------------------------------------------
     # 5. COMPILE & OUTPUT STATISTICS
     # ---------------------------------------------------------
-    - name: Compile Cleanup Statistics
-      ansible.builtin.set_fact:
-        cleanup_stats: |
-          System Cleanup Report for {{ inventory_hostname }}:
-          ------------------------------------------
-          1. Kernels Removed : {{ old_kernels.stdout_lines | length }}
-          2. Journal Freed   : {{ vacuum_output.stderr | regex_search('freed (.*?) of', '\1') | first | default('0B') }}
-          3. Snaps Removed   : {{ snap_clean.stdout_lines | length | default(0) }}
-          4. Apt Autoremove  : {{ 'Changed' if apt_autoremove.changed else 'No changes' }}
-          ------------------------------------------
-
-    - name: Display Statistics to Console
+    - name: Display Cleanup Statistics
       ansible.builtin.debug:
-        msg: "{{ cleanup_stats.split('\n') }}"
+        msg: 
+          - "=========================================="
+          - " SYSTEM CLEANUP REPORT: {{ inventory_hostname }}"
+          - "=========================================="
+          - "1. Kernels Removed : {{ old_kernels.stdout_lines | default([]) | length }}"
+          # The regex logic below is now wrapped in (...) or ['0B'] to handle 'None' results safely
+          - "2. Journal Freed   : {{ (vacuum_output.stderr | default('') | regex_search('freed (.*?) of', '\\1') or ['0B']) | first }}"
+          - "3. Snaps Removed   : {{ snap_clean.stdout_lines | default([]) | select('search', 'Removed') | list | length }}"
+          - "4. Apt Autoremove  : {{ 'Changed' if apt_autoremove.changed else 'No changes' }}"
+          - "=========================================="
