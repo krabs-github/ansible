@@ -1,7 +1,6 @@
 ---
 - name: Update and upgrade apt packages
   hosts: all
-
   become: true
 
   tasks:
@@ -25,8 +24,10 @@
           killall -9 apt-get || true
           killall -9 unattended-upgrade || true
         fi
+      args:
+        executable: /bin/bash
       when: ansible_pkg_mgr == 'apt'
-      changed_when: false # This task doesn't change system state in a way Ansible tracks
+      changed_when: false
 
     - name: Update packages with apt
       when: ansible_pkg_mgr == 'apt'
@@ -46,13 +47,11 @@
 
     - name: Send ntfy.sh update
       uri:
-       url: "https://ntfy.krabs.me/Alerts"
-       method: POST
-       body: "{{ inventory_hostname }} is being rebooted after system update."
+        url: "https://ntfy.krabs.me/Alerts"
+        method: POST
+        body: "{{ inventory_hostname }} is being rebooted after system update."
       when: reboot_required_file.stat.exists == true
 
     - name: Reboot the server (if required).
       ansible.builtin.reboot:
       when: reboot_required_file.stat.exists == true
-
-    
