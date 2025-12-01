@@ -4,42 +4,38 @@
   become: true
 
   tasks:
-    - name: Check for and remove potential apt locks
+    # 1. Safer Lock Handling
+    # Instead of deleting lock files (which risks DB corruption), we kill stale processes 
+    # and tell dpkg to repair itself. We also use 'lock_timeout' in the apt tasks below.
+    - name: Release apt locks if held by stale processes
       ansible.builtin.shell: |
-        set -euo pipefail
-        if [ -f /var/lib/dpkg/lock ]; then
-          echo "Removing /var/lib/dpkg/lock"
-          rm -f /var/lib/dpkg/lock
-        fi
-        if [ -f /var/lib/dpkg/lock-frontend ]; then
-          echo "Removing /var/lib/dpkg/lock-frontend"
-          rm -f /var/lib/dpkg/lock-frontend
-        fi
-        if [ -f /var/lib/apt/lists/lock ]; then
-          echo "Removing /var/lib/apt/lists/lock"
-          rm -f /var/lib/apt/lists/lock
-        fi
         if ps aux | grep -e '[a]pt-get' -e '[u]nattended-upgrade' | grep -v grep > /dev/null; then
-          echo "Killing active apt processes to release locks"
+          echo "Killing active apt processes"
           killall -9 apt-get || true
           killall -9 unattended-upgrade || true
+          # Recover dpkg state if it was interrupted
+          dpkg --configure -a
         fi
       args:
         executable: /bin/bash
       when: ansible_pkg_mgr == 'apt'
       changed_when: false
+      ignore_errors: true
 
     - name: Update packages with apt
       when: ansible_pkg_mgr == 'apt'
       ansible.builtin.apt:
         update_cache: true
+        cache_valid_time: 3600
+        lock_timeout: 300  # Wait up to 5 mins for other updates to finish naturally
 
     - name: Upgrade packages with apt
       when: ansible_pkg_mgr == 'apt'
       ansible.builtin.apt:
         upgrade: safe
+        lock_timeout: 300
 
-    - name: Check if a reboot is required.
+    - name: Check if a reboot is required
       ansible.builtin.stat:
         path: /var/run/reboot-required
         get_checksum: no
@@ -52,6 +48,18 @@
         body: "{{ inventory_hostname }} is being rebooted after system update."
       when: reboot_required_file.stat.exists == true
 
-    - name: Reboot the server (if required).
+    # 2. Connection Reset
+    # Closing the SSH connection explicitly prevents the "zombie" connection 
+    # that causes the reboot task to hang.
+    - name: Reset connection to avoid ssh persistence issues
+      meta: reset_connection
+
+    # 3. Reboot with Delays
+    # 'pre_reboot_delay' is the specific fix that prevents the hang.
+    - name: Reboot the server (if required)
       ansible.builtin.reboot:
+        msg: "Rebooting due to system updates"
+        pre_reboot_delay: 5    # Give Ansible 5s to disconnect cleanly before the OS goes down
+        post_reboot_delay: 10  # Wait 10s after the server comes up before checking success
+        reboot_timeout: 600    # Wait up to 10 minutes for the server to return
       when: reboot_required_file.stat.exists == true
