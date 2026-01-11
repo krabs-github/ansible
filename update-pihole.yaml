@@ -1,18 +1,42 @@
 ---
 - name: Update PiHole
   hosts: all
-
   become: true
+  gather_facts: false  # Speed up execution if you don't need system facts
 
   tasks:
-    - name: Update PiHole
-      command: pihole updatePihole
+    - name: Update apt cache and packages
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+        upgrade: dist
+      register: apt_update
 
-    - name: Update Gravity
-      command: pihole updateGravity
+    - name: Update PiHole Core, Web, and FTL
+      command: pihole -up
+      register: pihole_update
+      # Mark as 'changed' only if the output doesn't say "up to date"
+      changed_when: "'Everything is already up to date' not in pihole_update.stdout"
+      failed_when: 
+        - pihole_update.rc != 0
+        - "'Unable to complete update' in pihole_update.stdout"
+
+    - name: Update Gravity (Blocklists)
+      command: pihole -g
+      register: gravity_update
+      # Gravity almost always updates something, but we can suppress 'change' if you prefer
+      # changed_when: "'Success!' in gravity_update.stdout"
 
     - name: Send ntfy.sh update
       uri:
-       url: "http://192.168.86.3:8001/Alerts"
-       method: POST
-       body: "{{ inventory_hostname }} Pihole & Gravity updated."
+        url: "http://192.168.86.3:8001/Alerts"
+        method: POST
+        body: "{{ inventory_hostname }} Pi-hole updated successfully.\nCore: {{ 'Updated' if pihole_update.changed else 'No updates' }}\nGravity: Updated"
+        status_code: [200, 201, 202]
+        body_format: raw
+        headers:
+          Title: "Pi-hole Update Report"
+          Priority: "default"
+      # Only send notification if something actually changed or failed
+      when: pihole_update.changed or gravity_update.changed
+      ignore_errors: true

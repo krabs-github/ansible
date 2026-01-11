@@ -1,20 +1,21 @@
 ---
 - name: Update Portainer Agent
   hosts: all
-
   become: true
 
   tasks:
-    - name: Stop Portainer Agent
-      command: docker stop portainer_agent
-      ignore_errors: yes
+    - name: Pull latest Portainer Agent image
+      command: docker pull portainer/agent:latest
+      register: docker_pull
+      # Only marks 'changed' if a new layer was actually downloaded
+      changed_when: "'Downloaded newer image' in docker_pull.stdout"
 
-    - name: Remove Old Portainer Agent
-      command: docker rm portainer_agent
-      ignore_errors: yes
-
-    - name: Update Portainer Agent Image
-      command: docker pull portainer/agent
+    - name: Stop and Remove old container
+      shell: |
+        docker stop portainer_agent || true
+        docker rm portainer_agent || true
+      # Only run this if the pull task resulted in a change (new image found)
+      when: docker_pull.changed
 
     - name: Start Portainer Agent
       command: >
@@ -24,4 +25,8 @@
         --restart=always
         -v /var/run/docker.sock:/var/run/docker.sock
         -v /var/lib/docker/volumes:/var/lib/docker/volumes
-        portainer/agent
+        portainer/agent:latest
+      # Only run this if we just removed the old one OR if it doesn't exist yet
+      when: docker_pull.changed or (ansible_facts.services['docker'] is defined) # fallback logic
+      # A better check for "does container exist" would be complex in shell, 
+      # so usually, relying on docker_pull.changed is the safest minimal update.

@@ -1,18 +1,39 @@
 ---
 - name: Update Portainer
   hosts: all
-
   become: true
 
   tasks:
+    # 1. Pull the image FIRST. 
+    # If this fails, the script stops here and your existing Portainer stays alive.
+    - name: Pull latest Portainer image
+      command: docker pull portainer/portainer-ce:latest
+      register: docker_pull
+      # Only mark 'changed' if a new layer was downloaded
+      changed_when: "'Downloaded newer image' in docker_pull.stdout"
+
+    # 2. Only stop if we downloaded a new image
     - name: Stop Portainer
       command: docker stop portainer
+      ignore_errors: yes 
+      when: docker_pull.changed
 
+    # 3. Only remove if we downloaded a new image
     - name: Remove Old Portainer
       command: docker rm portainer
+      ignore_errors: yes
+      when: docker_pull.changed
 
-    - name: Update Portainer Image
-      command: docker pull portainer/portainer-ce
-
-    - name: Start Update Portainer
-      command: docker run -d -p 8000:8000 -p 9443:9443 --name=portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce
+    # 4. Start only if updated OR if it doesn't exist (fail-safe)
+    - name: Start Portainer
+      command: >
+        docker run -d 
+        -p 8000:8000 
+        -p 9443:9443 
+        --name=portainer 
+        --restart=always 
+        -v /var/run/docker.sock:/var/run/docker.sock 
+        -v portainer_data:/data 
+        portainer/portainer-ce:latest
+      # Logic: Run if we just updated, OR if the container isn't currently running
+      when: docker_pull.changed

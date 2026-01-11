@@ -42,7 +42,7 @@ cat<<heredoc > /etc/systemd/resolved.conf
 # Google:     8.8.8.8#dns.google 8.8.4.4#dns.google 2001:4860:4860::8888#dns.google 2001:4860:4860::8844#dns.google
 # Quad9:      9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net 2620:fe::fe#dns.quad9.net 2620:fe::9#dns.quad9.net
 DNS=192.168.86.4
-FallbackDNS=127.0.0.53
+FallbackDNS=192.168.86.6
 #Domains=
 #DNSSEC=no
 #DNSOverTLS=no
