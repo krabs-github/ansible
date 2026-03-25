@@ -17,3 +17,4 @@
       systemd:
         name: rsyslog
         state: restarted
+      failed_when: false
