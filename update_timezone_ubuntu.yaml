@@ -1,0 +1,19 @@
+---
+- name: Configure timezone and restart services
+  hosts: all
+  become: true # This allows Ansible to use sudo
+
+  tasks:
+    - name: Set timezone to America/New_York
+      timezone:
+        name: America/New_York
+
+    - name: Restart cron service
+      systemd:
+        name: cron
+        state: restarted
+
+    - name: Restart rsyslog service
+      systemd:
+        name: rsyslog
+        state: restarted
