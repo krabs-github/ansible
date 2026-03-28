@@ -1,0 +1,27 @@
+- name: Set timezone for all running Docker containers on multiple hosts
+  hosts:
+    - server01.krabs.me
+    - server04.krabs.me # Added server04.krabs.me
+  become: yes
+  tasks:
+    - name: Get list of running container names
+      community.docker.docker_host_info:
+        containers: yes
+      register: docker_info
+
+    - name: Set timezone in each running container
+      community.docker.docker_exec:
+        container_name: "{{ item.Names[0] | replace('/', '') }}"
+        command: >
+          /bin/sh -c "
+            if command -v setup-timezone >/dev/null 2>&1; then
+              setup-timezone -z America/New_York;
+            elif [ -f /etc/timezone ]; then
+              echo 'America/New_York' > /etc/timezone && cp /usr/share/zoneinfo/America/New_York /etc/localtime;
+            else
+              echo 'Timezone setup command not found or /etc/timezone not present for {{ item.Names[0] | replace('/', '') }}';
+            fi
+          "
+      loop: "{{ docker_info.containers }}"
+      when: item.State.Running # Only target running containers
+      changed_when: true # Assume a change happened for each container for simplicity
