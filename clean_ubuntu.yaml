@@ -1,166 +1,94 @@
 ---
-# =========================================================================
-# PLAY 1: Update and upgrade apt packages on ALL SERVERS EXCEPT NTFY SERVER
-# Ensures server01.krabs.me (ntfy server) remains available during this phase.
-# =========================================================================
-- name: Update and upgrade apt packages on ALL SERVERS EXCEPT NTFY SERVER
-  hosts: all:!server01.krabs.me
+- name: System Cleanup and Maintenance
+  hosts: all
   become: true
-
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-    NEEDRESTART_MODE: a
-    LC_ALL: C
-
+  
   tasks:
-    # -------------------------------------------------------------------------
-    # 1. PRE-CLEANUP
-    # -------------------------------------------------------------------------
-    - name: Release apt locks if held by stale processes
+    # ---------------------------------------------------------
+    # 1. REMOVE OLD KERNELS
+    # ---------------------------------------------------------
+    - name: Identify old kernels (excluding the running one)
       ansible.builtin.shell: |
-        if ps aux | grep -e '[a]pt-get' -e '[u]nattended-upgrade' | grep -v grep > /dev/null; then
-          echo "Killing active apt processes"
-          killall -9 apt-get || true
-          killall -9 unattended-upgrade || true
-          dpkg --configure -a --force-confold
+        IN_USE=$(uname -r)
+        dpkg --list | \
+        grep -v "$IN_USE" | \
+        grep -Ei 'linux-image|linux-headers|linux-modules' | \
+        awk '{ print $2 }'
+      register: old_kernels
+      changed_when: false
+      args:
+        executable: /bin/bash
+
+    - name: Purge old kernels identified
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: absent
+        purge: true
+      loop: "{{ old_kernels.stdout_lines | default([]) }}"
+      when: old_kernels.stdout_lines | length > 0
+      register: kernel_result
+
+    # ---------------------------------------------------------
+    # 2. CLEAN LOGS
+    # ---------------------------------------------------------
+    - name: Rotate systemd journal
+      ansible.builtin.command: journalctl --rotate
+      changed_when: true
+
+    - name: Vacuum systemd journal (keep 3 days)
+      ansible.builtin.command: journalctl --vacuum-time=3d
+      register: vacuum_output
+      # Using default('') prevents errors if stderr is missing
+      changed_when: "'0B' not in vacuum_output.stderr | default('')"
+
+    # ---------------------------------------------------------
+    # 3. REMOVE SNAPS
+    # ---------------------------------------------------------
+    - name: Remove disabled Snap revisions
+      ansible.builtin.shell: |
+        set -eu
+        # Check if snap command exists first to avoid shell errors
+        if command -v snap &> /dev/null; then
+            snap list --all | awk '/disabled/{print $1, $3}' |
+            while read snapname revision; do
+                snap remove "$snapname" --revision="$revision"
+                echo "Removed $snapname revision $revision"
+            done
+        else
+            echo "Snap not installed"
         fi
       args:
         executable: /bin/bash
-      when: ansible_pkg_mgr == 'apt'
-      changed_when: false
+      register: snap_clean
+      changed_when: "'Removed' in snap_clean.stdout"
       ignore_errors: true
-      delay: 5
 
-    # -------------------------------------------------------------------------
-    # 2. UPDATE & UPGRADE
-    # -------------------------------------------------------------------------
-    - name: Update packages with apt (apt-get update)
-      when: ansible_pkg_mgr == 'apt'
+    # ---------------------------------------------------------
+    # 4. APT CLEAN
+    # ---------------------------------------------------------
+    - name: Autoremove unused dependencies
       ansible.builtin.apt:
-        update_cache: true
-        cache_valid_time: 3600
-        lock_timeout: 300
-      register: apt_update_result
+        autoremove: true
+        purge: true
+      register: apt_autoremove
 
-    - name: Upgrade packages with apt (apt-get upgrade)
-      when: ansible_pkg_mgr == 'apt'
+    - name: Clean apt cache
       ansible.builtin.apt:
-        upgrade: safe
-        lock_timeout: 300
-        dpkg_options: 'force-confdef,force-confold'
-      register: apt_upgrade_result
+        clean: true
+      register: apt_clean
 
-    # -------------------------------------------------------------------------
-    # 3. REBOOT LOGIC
-    # -------------------------------------------------------------------------
-    - name: Check if a reboot is required
-      ansible.builtin.stat:
-        path: /var/run/reboot-required
-        get_checksum: no
-      register: reboot_required_file
-
-    - name: Send ntfy.sh update (if reboot is required)
-      ansible.builtin.uri:
-        url: "https://ntfy.krabs.me/Alerts"
-        method: POST
-        body: "{{ inventory_hostname }} is being rebooted after system update."
-        timeout: 10
-      when: reboot_required_file.stat.exists == true
-
-    # This 'meta: reset_connection' task CANNOT be conditional.
-    # It will always run if Ansible processes this point in the playbook.
-    # Its placement directly before the reboot task ensures it's useful
-    # when a reboot IS required. When a reboot is NOT required, the
-    # subsequent reboot task's 'when' condition will skip the reboot itself,
-    # and the connection reset will likely have no adverse effect.
-    - name: Reset connection to avoid ssh persistence issues before reboot
-      meta: reset_connection
-
-    - name: Reboot the server (if required)
-      ansible.builtin.reboot:
-        msg: "Rebooting due to system updates"
-        pre_reboot_delay: 5
-        post_reboot_delay: 10
-        reboot_timeout: 600
-      when: reboot_required_file.stat.exists == true
-      delay: 15
-
-
-# =========================================================================
-# PLAY 2: Update and upgrade apt packages on NTFY SERVER (server01.krabs.me)
-# This play runs after all other servers have been processed.
-# =========================================================================
-- name: Update and upgrade apt packages on NTFY SERVER
-  hosts: server01.krabs.me
-  become: true
-
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-    NEEDRESTART_MODE: a
-    LC_ALL: C
-
-  tasks:
-    # -------------------------------------------------------------------------
-    # 1. PRE-CLEANUP
-    # -------------------------------------------------------------------------
-    - name: Release apt locks if held by stale processes
-      ansible.builtin.shell: |
-        if ps aux | grep -e '[a]pt-get' -e '[u]nattended-upgrade' | grep -v grep > /dev/null; then
-          echo "Killing active apt processes"
-          killall -9 apt-get || true
-          killall -9 unattended-upgrade || true
-          dpkg --configure -a --force-confold
-        fi
-      args:
-        executable: /bin/bash
-      when: ansible_pkg_mgr == 'apt'
-      changed_when: false
-      ignore_errors: true
-      delay: 5
-
-    # -------------------------------------------------------------------------
-    # 2. UPDATE & UPGRADE
-    # -------------------------------------------------------------------------
-    - name: Update packages with apt (apt-get update)
-      when: ansible_pkg_mgr == 'apt'
-      ansible.builtin.apt:
-        update_cache: true
-        cache_valid_time: 3600
-        lock_timeout: 300
-      register: apt_update_result
-
-    - name: Upgrade packages with apt (apt-get upgrade)
-      when: ansible_pkg_mgr == 'apt'
-      ansible.builtin.apt:
-        upgrade: safe
-        lock_timeout: 300
-        dpkg_options: 'force-confdef,force-confold'
-      register: apt_upgrade_result
-
-    # -------------------------------------------------------------------------
-    # 3. REBOOT LOGIC
-    # -------------------------------------------------------------------------
-    - name: Check if a reboot is required
-      ansible.builtin.stat:
-        path: /var/run/reboot-required
-        get_checksum: no
-      register: reboot_required_file
-
-    - name: "Skipping ntfy.sh update from ntfy server (server01.krabs.me)"
+    # ---------------------------------------------------------
+    # 5. COMPILE & OUTPUT STATISTICS
+    # ---------------------------------------------------------
+    - name: Display Cleanup Statistics
       ansible.builtin.debug:
-        msg: "server01.krabs.me requires a reboot but will not send an ntfy notification via its own ntfy service."
-      when: reboot_required_file.stat.exists == true
-
-    # This 'meta: reset_connection' task CANNOT be conditional.
-    # It will always run if Ansible processes this point in the playbook.
-    - name: Reset connection to avoid ssh persistence issues before reboot
-      meta: reset_connection
-
-    - name: Reboot the server (if required)
-      ansible.builtin.reboot:
-        msg: "Rebooting due to system updates"
-        pre_reboot_delay: 5
-        post_reboot_delay: 10
-        reboot_timeout: 600
-      when: reboot_required_file.stat.exists == true
-      delay: 15
+        msg: 
+          - "=========================================="
+          - " SYSTEM CLEANUP REPORT: {{ inventory_hostname }}"
+          - "=========================================="
+          - "1. Kernels Removed : {{ old_kernels.stdout_lines | default([]) | length }}"
+          # The regex logic below is now wrapped in (...) or ['0B'] to handle 'None' results safely
+          - "2. Journal Freed   : {{ (vacuum_output.stderr | default('') | regex_search('freed (.*?) of', '\\1') or ['0B']) | first }}"
+          - "3. Snaps Removed   : {{ snap_clean.stdout_lines | default([]) | select('search', 'Removed') | list | length }}"
+          - "4. Apt Autoremove  : {{ 'Changed' if apt_autoremove.changed else 'No changes' }}"
+          - "=========================================="

@@ -4,122 +4,17 @@
 # Ensures server01.krabs.me (ntfy server) remains available during this phase.
 # =========================================================================
 - name: Update and upgrade apt packages on ALL SERVERS EXCEPT NTFY SERVER
-  hosts: all:!server01.krabs.me # Target all hosts, but exclude 'server01.krabs.me'
-  become: true # Run tasks with sudo/root privileges
+  hosts: all:!server01.krabs.me
+  become: true
 
-  # -------------------------------------------------------------------------
-  # GLOBAL ENVIRONMENT VARIABLES (THE ANTI-HANG FIX)
-  # Apply these to the whole play to ensure no task ever waits for user input.
-  # -------------------------------------------------------------------------
   environment:
-    # Tells Linux commands "I am a script, do not show me UI dialogs".
     DEBIAN_FRONTEND: noninteractive
-    
-    # Modern Ubuntu installs 'needrestart'. When libraries update, it halts 
-    # to ask: "Which services do you want to restart?" 
-    # Setting this to 'a' (automatic) answers that question automatically.
     NEEDRESTART_MODE: a
-    
-    # Ensures standard language settings so we don't get stuck on locale prompts.
     LC_ALL: C
 
   tasks:
     # -------------------------------------------------------------------------
     # 1. PRE-CLEANUP
-    #    If a previous run crashed or auto-updates are running, apt will be locked.
-    #    We kill the processes and tell dpkg to fix the database.
-    # -------------------------------------------------------------------------
-    - name: Release apt locks if held by stale processes
-      ansible.builtin.shell: |
-        if ps aux | grep -e '[a]pt-get' -e '[u]nattended-upgrade' | grep -v grep > /dev/null; then
-          echo "Killing active apt processes"
-          killall -9 apt-get || true
-          killall -9 unattended-upgrade || true
-          # Recover dpkg state if it was interrupted, forcing use of old configs
-          dpkg --configure -a --force-confold
-        fi
-      args:
-        executable: /bin/bash
-      when: ansible_pkg_mgr == 'apt' # Only run on apt-based systems
-      changed_when: false # This task doesn't change system state in a way Ansible tracks
-      ignore_errors: true # Continue even if killing processes fails
-      delay: 5 # Short delay to ensure killed processes are cleaned up
-
-    # -------------------------------------------------------------------------
-    # 2. UPDATE & UPGRADE
-    # -------------------------------------------------------------------------
-    - name: Update packages with apt (apt-get update)
-      when: ansible_pkg_mgr == 'apt'
-      ansible.builtin.apt:
-        update_cache: true      # Run 'apt-get update'
-        cache_valid_time: 3600  # Update cache if older than 1 hour
-        lock_timeout: 300       # Wait up to 5 mins for apt locks
-      register: apt_update_result # Register result (useful for debugging)
-
-    - name: Upgrade packages with apt (apt-get upgrade)
-      when: ansible_pkg_mgr == 'apt'
-      ansible.builtin.apt:
-        upgrade: safe           # Perform a 'safe' upgrade (apt-get upgrade)
-        lock_timeout: 300       # Wait up to 5 mins for apt locks
-        # CRITICAL FIX FOR HANGS:
-        # If a config file has changed, apt usually stops and asks "Keep or Overwrite?".
-        # force-confdef: If we haven't touched the file, update it.
-        # force-confold: If we HAVE touched the file, keep our version (don't ask).
-        dpkg_options: 'force-confdef,force-confold'
-      register: apt_upgrade_result # Register result
-
-    # -------------------------------------------------------------------------
-    # 3. REBOOT LOGIC
-    # -------------------------------------------------------------------------
-    - name: Check if a reboot is required
-      ansible.builtin.stat:
-        path: /var/run/reboot-required # This file is created if a reboot is needed
-        get_checksum: no # Don't bother with checksum, just existence is enough
-      register: reboot_required_file
-
-    - name: Send ntfy.sh update (if reboot is required)
-      ansible.builtin.uri:
-        url: "https://ntfy.krabs.me/Alerts"
-        method: POST
-        body: "{{ inventory_hostname }} is being rebooted after system update."
-        timeout: 10 # Prevent hanging if ntfy.sh server is slow/unreachable
-      when: reboot_required_file.stat.exists == true # Only send if a reboot is needed
-
-    # --- REBOOT SECTION FOR NON-NTFY SERVERS ---
-    # Use a block to conditionally execute both 'meta: reset_connection'
-    # and the 'reboot' task, as 'meta' tasks do not support 'when' directly.
-    - name: Handle server reboot if required (for non-ntfy servers)
-      block:
-        - name: Reset connection to avoid ssh persistence issues before reboot
-          meta: reset_connection # This will now only run if the block's 'when' is true
-
-        - name: Reboot the server
-          ansible.builtin.reboot:
-            msg: "Rebooting due to system updates"
-            pre_reboot_delay: 5    # Give Ansible 5s to disconnect cleanly
-            post_reboot_delay: 10  # Wait 10s after ping response before declaring "Success"
-            reboot_timeout: 600    # Wait up to 10 minutes for the server to come back
-          delay: 15 # Additional delay after reboot for services to stabilize
-      when: reboot_required_file.stat.exists == true # This entire block runs only if reboot is needed
-
-
-# =========================================================================
-# PLAY 2: Update and upgrade apt packages on NTFY SERVER (server01.krabs.me)
-# This play runs after all other servers have been processed.
-# =========================================================================
-- name: Update and upgrade apt packages on NTFY SERVER
-  hosts: server01.krabs.me # Only target the ntfy server here
-  become: true
-
-  # GLOBAL ENVIRONMENT VARIABLES (Same as above)
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-    NEEDRESTART_MODE: a
-    LC_ALL: C
-
-  tasks:
-    # -------------------------------------------------------------------------
-    # 1. PRE-CLEANUP (Same as above)
     # -------------------------------------------------------------------------
     - name: Release apt locks if held by stale processes
       ansible.builtin.shell: |
@@ -137,7 +32,7 @@
       delay: 5
 
     # -------------------------------------------------------------------------
-    # 2. UPDATE & UPGRADE (Same as above)
+    # 2. UPDATE & UPGRADE
     # -------------------------------------------------------------------------
     - name: Update packages with apt (apt-get update)
       when: ansible_pkg_mgr == 'apt'
@@ -164,25 +59,108 @@
         get_checksum: no
       register: reboot_required_file
 
-    # For the ntfy server itself, we avoid sending a notification via ntfy.sh
-    # as it might be unavailable. A debug message indicates the intent.
+    - name: Send ntfy.sh update (if reboot is required)
+      ansible.builtin.uri:
+        url: "https://ntfy.krabs.me/Alerts"
+        method: POST
+        body: "{{ inventory_hostname }} is being rebooted after system update."
+        timeout: 10
+      when: reboot_required_file.stat.exists == true
+
+    # This 'meta: reset_connection' task CANNOT be conditional.
+    # It will always run if Ansible processes this point in the playbook.
+    # Its placement directly before the reboot task ensures it's useful
+    # when a reboot IS required. When a reboot is NOT required, the
+    # subsequent reboot task's 'when' condition will skip the reboot itself,
+    # and the connection reset will likely have no adverse effect.
+    - name: Reset connection to avoid ssh persistence issues before reboot
+      meta: reset_connection
+
+    - name: Reboot the server (if required)
+      ansible.builtin.reboot:
+        msg: "Rebooting due to system updates"
+        pre_reboot_delay: 5
+        post_reboot_delay: 10
+        reboot_timeout: 600
+      when: reboot_required_file.stat.exists == true
+      delay: 15
+
+
+# =========================================================================
+# PLAY 2: Update and upgrade apt packages on NTFY SERVER (server01.krabs.me)
+# This play runs after all other servers have been processed.
+# =========================================================================
+- name: Update and upgrade apt packages on NTFY SERVER
+  hosts: server01.krabs.me
+  become: true
+
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+    LC_ALL: C
+
+  tasks:
+    # -------------------------------------------------------------------------
+    # 1. PRE-CLEANUP
+    # -------------------------------------------------------------------------
+    - name: Release apt locks if held by stale processes
+      ansible.builtin.shell: |
+        if ps aux | grep -e '[a]pt-get' -e '[u]nattended-upgrade' | grep -v grep > /dev/null; then
+          echo "Killing active apt processes"
+          killall -9 apt-get || true
+          killall -9 unattended-upgrade || true
+          dpkg --configure -a --force-confold
+        fi
+      args:
+        executable: /bin/bash
+      when: ansible_pkg_mgr == 'apt'
+      changed_when: false
+      ignore_errors: true
+      delay: 5
+
+    # -------------------------------------------------------------------------
+    # 2. UPDATE & UPGRADE
+    # -------------------------------------------------------------------------
+    - name: Update packages with apt (apt-get update)
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+        lock_timeout: 300
+      register: apt_update_result
+
+    - name: Upgrade packages with apt (apt-get upgrade)
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
+        upgrade: safe
+        lock_timeout: 300
+        dpkg_options: 'force-confdef,force-confold'
+      register: apt_upgrade_result
+
+    # -------------------------------------------------------------------------
+    # 3. REBOOT LOGIC
+    # -------------------------------------------------------------------------
+    - name: Check if a reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+        get_checksum: no
+      register: reboot_required_file
+
     - name: "Skipping ntfy.sh update from ntfy server (server01.krabs.me)"
       ansible.builtin.debug:
         msg: "server01.krabs.me requires a reboot but will not send an ntfy notification via its own ntfy service."
       when: reboot_required_file.stat.exists == true
 
-    # --- REBOOT SECTION FOR NTFY SERVER ---
-    # Uses a block to conditionally execute 'meta: reset_connection' and 'reboot'.
-    - name: Handle server reboot if required (for ntfy server)
-      block:
-        - name: Reset connection to avoid ssh persistence issues before reboot
-          meta: reset_connection
+    # This 'meta: reset_connection' task CANNOT be conditional.
+    # It will always run if Ansible processes this point in the playbook.
+    - name: Reset connection to avoid ssh persistence issues before reboot
+      meta: reset_connection
 
-        - name: Reboot the server
-          ansible.builtin.reboot:
-            msg: "Rebooting due to system updates"
-            pre_reboot_delay: 5
-            post_reboot_delay: 10
-            reboot_timeout: 600
-          delay: 15
+    - name: Reboot the server (if required)
+      ansible.builtin.reboot:
+        msg: "Rebooting due to system updates"
+        pre_reboot_delay: 5
+        post_reboot_delay: 10
+        reboot_timeout: 600
       when: reboot_required_file.stat.exists == true
+      delay: 15
