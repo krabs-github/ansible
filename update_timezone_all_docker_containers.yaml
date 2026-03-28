@@ -10,22 +10,39 @@
       register: running_containers
       changed_when: false
 
+    - name: Debug - Show raw output from docker ps
+      ansible.builtin.debug:
+        var: running_containers.stdout_lines
+      # Run this task always to see the output for debugging
+
     - name: Set timezone in each running container
+      # Only proceed if there are actual lines in the output
+      when: running_containers.stdout_lines is defined and running_containers.stdout_lines | length > 0
+
       ansible.builtin.shell: |
-        CONTAINER_NAME="{{ item.split('\t')[1] }}" # Split by tab, get the name
-        CONTAINER_ID="{{ item.split('\t')[0] }}"   # Get the ID
-        echo "Processing container: $CONTAINER_NAME ($CONTAINER_ID)"
+        # Use a more robust check for splitting, providing a default if split fails
+        {% set parts = item.split('\t') %}
+        {% set CONTAINER_ID = parts[0] | default('') %}
+        {% set CONTAINER_NAME = parts[1] | default('') %}
+
+        # Add a check to ensure both parts exist before proceeding
+        if [ -z "{{ CONTAINER_ID }}" ] || [ -z "{{ CONTAINER_NAME }}" ]; then
+          echo "Skipping malformed line: '{{ item }}' - Missing ID or Name."
+          exit 0 # Exit successfully for this item, as it's a skip
+        fi
+
+        echo "Processing container: {{ CONTAINER_NAME }} ({{ CONTAINER_ID }})"
 
         # Check for setup-timezone (Alpine)
-        if docker exec "$CONTAINER_ID" command -v setup-timezone >/dev/null 2>&1; then
-          echo "  Using setup-timezone for $CONTAINER_NAME"
-          docker exec "$CONTAINER_ID" setup-timezone -z America/New_York
+        if docker exec "{{ CONTAINER_ID }}" command -v setup-timezone >/dev/null 2>&1; then
+          echo "  Using setup-timezone for {{ CONTAINER_NAME }}"
+          docker exec "{{ CONTAINER_ID }}" setup-timezone -z America/New_York
         # Else, check for /etc/timezone (Ubuntu/Debian)
-        elif docker exec "$CONTAINER_ID" test -f /etc/timezone; then
-          echo "  Manually setting timezone for $CONTAINER_NAME"
-          docker exec "$CONTAINER_ID" sh -c "echo 'America/New_York' > /etc/timezone && cp /usr/share/zoneinfo/America/New_York /etc/localtime"
+        elif docker exec "{{ CONTAINER_ID }}" test -f /etc/timezone; then
+          echo "  Manually setting timezone for {{ CONTAINER_NAME }}"
+          docker exec "{{ CONTAINER_ID }}" sh -c "echo 'America/New_York' > /etc/timezone && cp /usr/share/zoneinfo/America/New_York /etc/localtime"
         else
-          echo "  Could not determine timezone setup method for $CONTAINER_NAME. Skipping."
+          echo "  Could not determine timezone setup method for {{ CONTAINER_NAME }}. Skipping."
         fi
       loop: "{{ running_containers.stdout_lines }}"
-      # changed_when: true # Assume change, or add more complex check if needed
+      # You can keep changed_when: true or modify it based on task output if desired.
