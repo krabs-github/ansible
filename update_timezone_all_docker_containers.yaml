@@ -1,27 +1,33 @@
-- name: Set timezone for all running Docker containers on multiple hosts
+- name: Set timezone for all running Docker containers on multiple hosts using raw docker commands
   hosts:
     - server01.krabs.me
-    - server04.krabs.me # Added server04.krabs.me
-  become: yes
+    - server04.krabs.me
+  become: yes # Needed to run docker commands, as docker usually requires root or docker group
   tasks:
-    - name: Get list of running container names
-      community.docker.docker_host_info:
-        containers: yes
-      register: docker_info
+    - name: Get list of running container IDs and names
+      ansible.builtin.shell: |
+        docker ps --format '{{.ID}}\t{{.Names}}'
+      register: running_containers
+      changed_when: false # This task only gathers info, doesn't change anything
 
     - name: Set timezone in each running container
-      community.docker.docker_exec:
-        container_name: "{{ item.Names[0] | replace('/', '') }}"
-        command: >
-          /bin/sh -c "
-            if command -v setup-timezone >/dev/null 2>&1; then
-              setup-timezone -z America/New_York;
-            elif [ -f /etc/timezone ]; then
-              echo 'America/New_York' > /etc/timezone && cp /usr/share/zoneinfo/America/New_York /etc/localtime;
-            else
-              echo 'Timezone setup command not found or /etc/timezone not present for {{ item.Names[0] | replace('/', '') }}';
-            fi
-          "
-      loop: "{{ docker_info.containers }}"
-      when: item.State.Running # Only target running containers
-      changed_when: true # Assume a change happened for each container for simplicity
+      ansible.builtin.shell: |
+        CONTAINER_NAME="{{ item.split('\t')[1] }}" # Split by tab, get the name
+        CONTAINER_ID="{{ item.split('\t')[0] }}"   # Get the ID
+        echo "Processing container: $CONTAINER_NAME ($CONTAINER_ID)"
+
+        # Check for setup-timezone (Alpine)
+        if docker exec "$CONTAINER_ID" command -v setup-timezone >/dev/null 2>&1; then
+          echo "  Using setup-timezone for $CONTAINER_NAME"
+          docker exec "$CONTAINER_ID" setup-timezone -z America/New_York
+        # Else, check for /etc/timezone (Ubuntu/Debian)
+        elif docker exec "$CONTAINER_ID" test -f /etc/timezone; then
+          echo "  Manually setting timezone for $CONTAINER_NAME"
+          docker exec "$CONTAINER_ID" sh -c "echo 'America/New_York' > /etc/timezone && cp /usr/share/zoneinfo/America/New_York /etc/localtime"
+        else
+          echo "  Could not determine timezone setup method for $CONTAINER_NAME. Skipping."
+        fi
+      loop: "{{ running_containers.stdout_lines }}"
+      # changed_when: true # Assume change, or add more complex check if needed
+      # You might want to remove changed_when: true if you want more accurate reporting
+      # but it's fine for simple tasks like this.
