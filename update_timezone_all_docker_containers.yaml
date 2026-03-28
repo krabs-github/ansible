@@ -17,11 +17,8 @@
     - name: Set timezone in each running container
       when: running_containers.stdout_lines is defined and running_containers.stdout_lines | length > 0
       loop: "{{ running_containers.stdout_lines }}"
-      # We will construct the entire shell command as a Jinja2 expression
-      # and pass it to the 'cmd' parameter for clarity, or just directly to 'shell'
       ansible.builtin.shell:
         cmd: |
-          # Use shell string manipulation to parse item, passed as an argument
           LINE="{{ item }}"
           CONTAINER_ID=$(echo "$LINE" | cut -f1)
           CONTAINER_NAME=$(echo "$LINE" | cut -f2)
@@ -35,10 +32,13 @@
 
           if docker exec "$CONTAINER_ID" command -v setup-timezone >/dev/null 2>&1; then
             echo "  Using setup-timezone for $CONTAINER_NAME"
+            # Alpine's setup-timezone might need root, but often it's designed to be run as it is.
+            # If this also fails for some Alpine containers, we might need -u 0 here too.
             docker exec "$CONTAINER_ID" setup-timezone -z America/New_York
           elif docker exec "$CONTAINER_ID" test -f /etc/timezone; then
             echo "  Manually setting timezone for $CONTAINER_NAME"
-            docker exec "$CONTAINER_ID" sh -c "echo 'America/New_New_York' > /etc/timezone && cp /usr/share/zoneinfo/America/New_York /etc/localtime"
+            # Add -u 0 to run as root inside the container for file operations
+            docker exec -u 0 "$CONTAINER_ID" sh -c "echo 'America/New_York' > /etc/timezone && cp /usr/share/zoneinfo/America/New_York /etc/localtime"
           else
             echo "  Could not determine timezone setup method for $CONTAINER_NAME. Skipping."
           fi
