@@ -13,38 +13,32 @@
     - name: Debug - Show raw output from docker ps
       ansible.builtin.debug:
         var: running_containers.stdout_lines
-      # This debug task is still very useful, keep it for now.
 
     - name: Set timezone in each running container
-      # Only proceed if there are actual lines in the output
       when: running_containers.stdout_lines is defined and running_containers.stdout_lines | length > 0
-
-      ansible.builtin.shell: |
-        # Use shell string manipulation to parse item
-        LINE="{{ item }}"
-        # Extract ID (first part before tab)
-        CONTAINER_ID=$(echo "$LINE" | cut -f1)
-        # Extract Name (second part after tab)
-        CONTAINER_NAME=$(echo "$LINE" | cut -f2)
-
-        # Basic check to ensure both parts were extracted
-        if [ -z "$CONTAINER_ID" ] || [ -z "$CONTAINER_NAME" ]; then
-          echo "Skipping malformed line: '$LINE' - Missing ID or Name after split. This might indicate an issue with docker ps --format or no running containers."
-          exit 0 # Exit successfully for this item, as it's a skip
-        fi
-
-        echo "Processing container: $CONTAINER_NAME ($CONTAINER_ID)"
-
-        # Check for setup-timezone (Alpine)
-        if docker exec "$CONTAINER_ID" command -v setup-timezone >/dev/null 2>&1; then
-          echo "  Using setup-timezone for $CONTAINER_NAME"
-          docker exec "$CONTAINER_ID" setup-timezone -z America/New_York
-        # Else, check for /etc/timezone (Ubuntu/Debian)
-        elif docker exec "$CONTAINER_ID" test -f /etc/timezone; then
-          echo "  Manually setting timezone for $CONTAINER_NAME"
-          docker exec "$CONTAINER_ID" sh -c "echo 'America/New_York' > /etc/timezone && cp /usr/share/zoneinfo/America/New_York /etc/localtime"
-        else
-          echo "  Could not determine timezone setup method for $CONTAINER_NAME. Skipping."
-        fi
       loop: "{{ running_containers.stdout_lines }}"
-      # changed_when: true # Keep this if you want to report changes
+      # We will construct the entire shell command as a Jinja2 expression
+      # and pass it to the 'cmd' parameter for clarity, or just directly to 'shell'
+      ansible.builtin.shell:
+        cmd: |
+          # Use shell string manipulation to parse item, passed as an argument
+          LINE="{{ item }}"
+          CONTAINER_ID=$(echo "$LINE" | cut -f1)
+          CONTAINER_NAME=$(echo "$LINE" | cut -f2)
+
+          if [ -z "$CONTAINER_ID" ] || [ -z "$CONTAINER_NAME" ]; then
+            echo "Skipping malformed line: '$LINE' - Missing ID or Name."
+            exit 0
+          fi
+
+          echo "Processing container: $CONTAINER_NAME ($CONTAINER_ID)"
+
+          if docker exec "$CONTAINER_ID" command -v setup-timezone >/dev/null 2>&1; then
+            echo "  Using setup-timezone for $CONTAINER_NAME"
+            docker exec "$CONTAINER_ID" setup-timezone -z America/New_York
+          elif docker exec "$CONTAINER_ID" test -f /etc/timezone; then
+            echo "  Manually setting timezone for $CONTAINER_NAME"
+            docker exec "$CONTAINER_ID" sh -c "echo 'America/New_New_York' > /etc/timezone && cp /usr/share/zoneinfo/America/New_York /etc/localtime"
+          else
+            echo "  Could not determine timezone setup method for $CONTAINER_NAME. Skipping."
+          fi
