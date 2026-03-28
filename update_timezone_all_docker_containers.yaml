@@ -22,6 +22,8 @@
           LINE="{{ item }}"
           CONTAINER_ID=$(echo "$LINE" | cut -f1)
           CONTAINER_NAME=$(echo "$LINE" | cut -f2)
+          TARGET_TIMEZONE="America/New_York"
+          ZONEINFO_PATH="/usr/share/zoneinfo/$TARGET_TIMEZONE"
 
           if [ -z "$CONTAINER_ID" ] || [ -z "$CONTAINER_NAME" ]; then
             echo "Skipping malformed line: '$LINE' - Missing ID or Name."
@@ -30,15 +32,23 @@
 
           echo "Processing container: $CONTAINER_NAME ($CONTAINER_ID)"
 
+          # Check for setup-timezone (Alpine, if available)
           if docker exec "$CONTAINER_ID" command -v setup-timezone >/dev/null 2>&1; then
             echo "  Using setup-timezone for $CONTAINER_NAME"
-            # Alpine's setup-timezone might need root, but often it's designed to be run as it is.
-            # If this also fails for some Alpine containers, we might need -u 0 here too.
-            docker exec "$CONTAINER_ID" setup-timezone -z America/New_York
+            docker exec -u 0 "$CONTAINER_ID" setup-timezone -z "$TARGET_TIMEZONE"
+
+          # Check for /etc/timezone (Ubuntu/Debian)
           elif docker exec "$CONTAINER_ID" test -f /etc/timezone; then
-            echo "  Manually setting timezone for $CONTAINER_NAME"
-            # Add -u 0 to run as root inside the container for file operations
-            docker exec -u 0 "$CONTAINER_ID" sh -c "echo 'America/New_York' > /etc/timezone && cp /usr/share/zoneinfo/America/New_York /etc/localtime"
+            echo "  Manually setting timezone for $CONTAINER_NAME (Ubuntu/Debian style)"
+            docker exec -u 0 "$CONTAINER_ID" sh -c "echo '$TARGET_TIMEZONE' > /etc/timezone && cp \"$ZONEINFO_PATH\" /etc/localtime"
+
+          # Fallback for Alpine-like containers without setup-timezone, using symlink
+          elif docker exec "$CONTAINER_ID" test -d /usr/share/zoneinfo/"$(dirname "$TARGET_TIMEZONE")"; then
+            echo "  Setting timezone via /etc/localtime symlink for $CONTAINER_NAME (Alpine style fallback)"
+            docker exec -u 0 "$CONTAINER_ID" sh -c "
+              rm -f /etc/localtime && \
+              ln -sf \"$ZONEINFO_PATH\" /etc/localtime
+            "
           else
-            echo "  Could not determine timezone setup method for $CONTAINER_NAME. Skipping."
+            echo "  Could not determine timezone setup method or zoneinfo files for $CONTAINER_NAME. Skipping."
           fi
