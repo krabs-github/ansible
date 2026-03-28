@@ -1,4 +1,4 @@
-- name: Set timezone for all running Docker containers on multiple hosts using raw docker commands
+- name: Set and verify timezone for all running Docker containers on multiple hosts
   hosts:
     - server01.krabs.me
     - server04.krabs.me
@@ -52,3 +52,34 @@
           else
             echo "  Could not determine timezone setup method or zoneinfo files for $CONTAINER_NAME. Skipping."
           fi
+      changed_when: false # Set to false to avoid reporting "changed" if the command itself just reports something, not makes a change
+
+    - name: Report current timezone for each container
+      when: running_containers.stdout_lines is defined and running_containers.stdout_lines | length > 0
+      loop: "{{ running_containers.stdout_lines }}"
+      ansible.builtin.shell:
+        cmd: |
+          LINE="{{ item }}"
+          CONTAINER_ID=$(echo "$LINE" | cut -f1)
+          CONTAINER_NAME=$(echo "$LINE" | cut -f2)
+
+          if [ -z "$CONTAINER_ID" ] || [ -z "$CONTAINER_NAME" ]; then
+            echo "Skipping malformed line for reporting: '$LINE'"
+            exit 0
+          fi
+
+          # Use 'date' to get the current date and timezone
+          # -u 0 (root) is used just in case the default user doesn't have permissions to run date in a way that shows timezone
+          # or if the date command itself is in a root-only path (unlikely but safe)
+          echo "Container '{{ CONTAINER_NAME }}' (ID: {{ CONTAINER_ID }}):"
+          docker exec -u 0 "$CONTAINER_ID" date
+      register: timezone_report
+      changed_when: false # This task only reports, doesn't change anything
+
+    - name: Display timezone report
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ timezone_report.results }}"
+      loop_control:
+        label: "{{ item.item.split('\t')[1] | default(item.item) }}" # Show container name in label
+      when: item.skipped is not defined and item.stdout_lines is defined
