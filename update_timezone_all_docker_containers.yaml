@@ -1,65 +1,74 @@
+---
 - name: Set and verify timezone for all running Docker containers on multiple hosts
   hosts:
     - server01.krabs.me
     - server04.krabs.me
-  become: yes
+  become: yes # Ensures Ansible connects as a user with sudo privileges on the host
+
   tasks:
     - name: Get list of running container IDs and names
       ansible.builtin.shell: |
         docker ps --format '{% raw %}{{.ID}}{% endraw %}\t{% raw %}{{.Names}}{% endraw %}'
       register: running_containers
-      changed_when: false
+      changed_when: false # This task only gathers info, doesn't change anything
 
-    - name: Debug - Show raw output from docker ps
+    - name: Debug - Show raw output from docker ps (for troubleshooting)
       ansible.builtin.debug:
         var: running_containers.stdout_lines
+      # You can remove or comment out this debug task once everything is working reliably.
 
     - name: Set timezone in each running container
       when: running_containers.stdout_lines is defined and running_containers.stdout_lines | length > 0
       loop: "{{ running_containers.stdout_lines }}"
       ansible.builtin.shell:
         cmd: |
-          LINE="{{ item }}"
-          CONTAINER_ID=$(echo "$LINE" | cut -f1)
-          CONTAINER_NAME=$(echo "$LINE" | cut -f2)
+          LINE="{{ item }}" # Ansible loop item (e.g., "id123\tcontainer_name")
+          CONTAINER_ID=$(echo "$LINE" | cut -f1) # Extract ID using shell command
+          CONTAINER_NAME=$(echo "$LINE" | cut -f2) # Extract Name using shell command
           TARGET_TIMEZONE="America/New_York"
           ZONEINFO_PATH="/usr/share/zoneinfo/$TARGET_TIMEZONE"
 
+          # Basic validation for malformed lines
           if [ -z "$CONTAINER_ID" ] || [ -z "$CONTAINER_NAME" ]; then
-            echo "Skipping malformed line: '$LINE' - Missing ID or Name."
-            exit 0
+            echo "Skipping malformed line: '$LINE' - Missing ID or Name after parsing. This might indicate an issue with docker ps --format output or no running containers."
+            exit 0 # Exit successfully for this item, as it's a skip
           fi
 
           echo "Processing container: $CONTAINER_NAME ($CONTAINER_ID)"
 
-          # Check for setup-timezone (Alpine, if available)
+          # --- Timezone setting logic ---
+
+          # 1. Attempt to use 'setup-timezone' (common in some Alpine images)
           if docker exec "$CONTAINER_ID" command -v setup-timezone >/dev/null 2>&1; then
-            echo "  Using setup-timezone for $CONTAINER_NAME"
+            echo "  Method: Using 'setup-timezone' for $CONTAINER_NAME"
             docker exec -u 0 "$CONTAINER_ID" setup-timezone -z "$TARGET_TIMEZONE"
 
-          # Check for /etc/timezone (Ubuntu/Debian)
+          # 2. Attempt to use '/etc/timezone' file (common in Ubuntu/Debian-based images)
           elif docker exec "$CONTAINER_ID" test -f /etc/timezone; then
-            echo "  Manually setting timezone for $CONTAINER_NAME (Ubuntu/Debian style)"
+            echo "  Method: Manually setting timezone via /etc/timezone (Ubuntu/Debian style) for $CONTAINER_NAME"
             docker exec -u 0 "$CONTAINER_ID" sh -c "echo '$TARGET_TIMEZONE' > /etc/timezone && cp \"$ZONEINFO_PATH\" /etc/localtime"
 
-          # Fallback for Alpine-like containers without setup-timezone, using symlink
+          # 3. Fallback: Use symlink to /etc/localtime (common for minimal Alpine images without setup-timezone)
           elif docker exec "$CONTAINER_ID" test -d /usr/share/zoneinfo/"$(dirname "$TARGET_TIMEZONE")"; then
-            echo "  Setting timezone via /etc/localtime symlink for $CONTAINER_NAME (Alpine style fallback)"
+            echo "  Method: Setting timezone via /etc/localtime symlink (Alpine style fallback) for $CONTAINER_NAME"
             docker exec -u 0 "$CONTAINER_ID" sh -c "
               rm -f /etc/localtime && \
               ln -sf \"$ZONEINFO_PATH\" /etc/localtime
             "
+          # 4. If no method works
           else
-            echo "  Could not determine timezone setup method or zoneinfo files for $CONTAINER_NAME. Skipping."
+            echo "  Could not determine a suitable timezone setup method or zoneinfo files for $CONTAINER_NAME. Skipping."
           fi
-      changed_when: false # Set to false to avoid reporting "changed" if the command itself just reports something, not makes a change
+      changed_when: false # Set to false as the shell command reports its own changes, not Ansible's direct state change
 
     - name: Report current timezone for each container
+      # This task runs after attempting to set timezones.
+      # It will gather and display the effective timezone.
       when: running_containers.stdout_lines is defined and running_containers.stdout_lines | length > 0
       loop: "{{ running_containers.stdout_lines }}"
       ansible.builtin.shell:
         cmd: |
-          LINE="{{ item }}"
+          LINE="{{ item }}" # Ansible loop item (e.g., "id123\tcontainer_name")
           CONTAINER_ID=$(echo "$LINE" | cut -f1)
           CONTAINER_NAME=$(echo "$LINE" | cut -f2)
 
@@ -68,18 +77,18 @@
             exit 0
           fi
 
-          # Use 'date' to get the current date and timezone
-          # -u 0 (root) is used just in case the default user doesn't have permissions to run date in a way that shows timezone
-          # or if the date command itself is in a root-only path (unlikely but safe)
-          echo "Container '{{ CONTAINER_NAME }}' (ID: {{ CONTAINER_ID }}):"
+          # Use shell variables for output formatting
+          echo "Container '$CONTAINER_NAME' (ID: $CONTAINER_ID):"
+          # Execute 'date' inside the container to get its current time and timezone
+          # -u 0 (root) ensures permissions to run date in all cases
           docker exec -u 0 "$CONTAINER_ID" date
       register: timezone_report
-      changed_when: false # This task only reports, doesn't change anything
+      changed_when: false # This task only reports, does not change state
 
     - name: Display timezone report
       ansible.builtin.debug:
-        msg: "{{ item.stdout_lines }}"
+        msg: "{{ item.stdout_lines }}" # Display the stdout (date output) for each container
       loop: "{{ timezone_report.results }}"
       loop_control:
-        label: "{{ item.item.split('\t')[1] | default(item.item) }}" # Show container name in label
-      when: item.skipped is not defined and item.stdout_lines is defined
+        label: "{{ item.item.split('\t')[1] | default(item.item) }}" # Use container name for readable labels
+      when: item.skipped is not defined and item.stdout_lines is defined # Only show valid reports
