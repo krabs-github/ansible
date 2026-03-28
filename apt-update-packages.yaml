@@ -1,44 +1,32 @@
 ---
-- name: Update and upgrade apt packages
-  hosts: all
+- name: Update and upgrade apt packages on ALL SERVERS EXCEPT NTFY SERVER
+  # Target all hosts, then exclude 'server01.krabs.me'
+  hosts: all:!server01.krabs.me 
   become: true
 
-  # -------------------------------------------------------------------------
-  # GLOBAL ENVIRONMENT VARIABLES (THE ANTI-HANG FIX)
-  # -------------------------------------------------------------------------
-  # We apply these to the whole play to ensure no task ever waits for user input.
   environment:
-    # Tells Linux commands "I am a script, do not show me UI dialogs".
     DEBIAN_FRONTEND: noninteractive
-    
-    # Modern Ubuntu installs 'needrestart'. When libraries update, it halts 
-    # to ask: "Which services do you want to restart?" 
-    # Setting this to 'a' (automatic) answers that question automatically.
     NEEDRESTART_MODE: a
-    
-    # Ensures standard language settings so we don't get stuck on locale prompts.
     LC_ALL: C
 
   tasks:
     # -------------------------------------------------------------------------
     # 1. PRE-CLEANUP
     # -------------------------------------------------------------------------
-    # If a previous run crashed or auto-updates are running, apt will be locked.
-    # We kill the processes and tell dpkg to fix the database.
     - name: Release apt locks if held by stale processes
       ansible.builtin.shell: |
         if ps aux | grep -e '[a]pt-get' -e '[u]nattended-upgrade' | grep -v grep > /dev/null; then
           echo "Killing active apt processes"
           killall -9 apt-get || true
           killall -9 unattended-upgrade || true
-          # Recover dpkg state if it was interrupted
-          dpkg --configure -a
+          dpkg --configure -a --force-confold
         fi
       args:
         executable: /bin/bash
       when: ansible_pkg_mgr == 'apt'
       changed_when: false
       ignore_errors: true
+      delay: 5
 
     # -------------------------------------------------------------------------
     # 2. UPDATE & UPGRADE
@@ -48,18 +36,16 @@
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
-        lock_timeout: 300  # Wait 5 mins for locks to clear naturally
+        lock_timeout: 300
+      register: apt_update_result
 
     - name: Upgrade packages with apt (apt-get upgrade)
       when: ansible_pkg_mgr == 'apt'
       ansible.builtin.apt:
         upgrade: safe
         lock_timeout: 300
-        # CRITICAL FIX FOR HANGS:
-        # If a config file has changed, apt usually stops and asks "Keep or Overwrite?".
-        # force-confdef: If we haven't touched the file, update it.
-        # force-confold: If we HAVE touched the file, keep our version (don't ask).
         dpkg_options: 'force-confdef,force-confold'
+      register: apt_upgrade_result
 
     # -------------------------------------------------------------------------
     # 3. REBOOT LOGIC
@@ -70,25 +56,103 @@
         get_checksum: no
       register: reboot_required_file
 
-    - name: Send ntfy.sh update
-      uri:
+    # For these non-ntfy servers, we send the notification
+    - name: Send ntfy.sh update (if reboot is required)
+      ansible.builtin.uri:
         url: "https://ntfy.krabs.me/Alerts"
         method: POST
         body: "{{ inventory_hostname }} is being rebooted after system update."
+        timeout: 10
       when: reboot_required_file.stat.exists == true
 
-    # Closing the SSH connection explicitly prevents the "zombie" connection 
-    # that causes the reboot task to hang indefinitely in Semaphore/Ansible.
-    - name: Reset connection to avoid ssh persistence issues
+    - name: Reset connection to avoid ssh persistence issues before reboot
       meta: reset_connection
+      when: reboot_required_file.stat.exists == true
 
     - name: Reboot the server (if required)
       ansible.builtin.reboot:
         msg: "Rebooting due to system updates"
-        # Give Ansible 5s to disconnect cleanly before the OS kills the network
-        pre_reboot_delay: 5    
-        # Wait 10s after the server responds to ping before declaring "Success"
-        post_reboot_delay: 10  
-        # Wait up to 10 minutes for the server to come back
-        reboot_timeout: 600    
+        pre_reboot_delay: 5
+        post_reboot_delay: 10
+        reboot_timeout: 600
       when: reboot_required_file.stat.exists == true
+      delay: 15
+
+# --- START SECOND PLAY: UPDATE NTFY SERVER LAST ---
+- name: Update and upgrade apt packages on NTFY SERVER
+  hosts: server01.krabs.me # Only target the ntfy server here
+  become: true
+
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+    LC_ALL: C
+
+  tasks:
+    # (Repeat the same tasks as above for consistency)
+    # -------------------------------------------------------------------------
+    # 1. PRE-CLEANUP
+    # -------------------------------------------------------------------------
+    - name: Release apt locks if held by stale processes
+      ansible.builtin.shell: |
+        if ps aux | grep -e '[a]pt-get' -e '[u]nattended-upgrade' | grep -v grep > /dev/null; then
+          echo "Killing active apt processes"
+          killall -9 apt-get || true
+          killall -9 unattended-upgrade || true
+          dpkg --configure -a --force-confold
+        fi
+      args:
+        executable: /bin/bash
+      when: ansible_pkg_mgr == 'apt'
+      changed_when: false
+      ignore_errors: true
+      delay: 5
+
+    # -------------------------------------------------------------------------
+    # 2. UPDATE & UPGRADE
+    # -------------------------------------------------------------------------
+    - name: Update packages with apt (apt-get update)
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+        lock_timeout: 300
+      register: apt_update_result
+
+    - name: Upgrade packages with apt (apt-get upgrade)
+      when: ansible_pkg_mgr == 'apt'
+      ansible.builtin.apt:
+        upgrade: safe
+        lock_timeout: 300
+        dpkg_options: 'force-confdef,force-confold'
+      register: apt_upgrade_result
+
+    # -------------------------------------------------------------------------
+    # 3. REBOOT LOGIC
+    # -------------------------------------------------------------------------
+    - name: Check if a reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+        get_checksum: no
+      register: reboot_required_file
+
+    # We generally skip ntfy notification FROM the ntfy server,
+    # or you could configure a different, external notification method here
+    # if you have one. For now, skipping is safest.
+    - name: "Skipping ntfy.sh update from ntfy server (server01.krabs.me)"
+      ansible.builtin.debug:
+        msg: "server01.krabs.me requires a reboot but will not send an ntfy notification."
+      when: reboot_required_file.stat.exists == true
+
+    - name: Reset connection to avoid ssh persistence issues before reboot
+      meta: reset_connection
+      when: reboot_required_file.stat.exists == true
+
+    - name: Reboot the server (if required)
+      ansible.builtin.reboot:
+        msg: "Rebooting due to system updates"
+        pre_reboot_delay: 5
+        post_reboot_delay: 10
+        reboot_timeout: 600
+      when: reboot_required_file.stat.exists == true
+      delay: 15
