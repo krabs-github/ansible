@@ -2,13 +2,13 @@
   hosts:
     - server01.krabs.me
     - server04.krabs.me
-  become: yes # Needed to run docker commands, as docker usually requires root or docker group
+  become: yes
   tasks:
     - name: Get list of running container IDs and names
       ansible.builtin.shell: |
-        docker ps --format '{{.ID}}\t{{.Names}}'
+        docker ps --format '{% raw %}{{.ID}}{% endraw %}\t{% raw %}{{.Names}}{% endraw %}'
       register: running_containers
-      changed_when: false # This task only gathers info, doesn't change anything
+      changed_when: false
 
     - name: Set timezone in each running container
       ansible.builtin.shell: |
@@ -29,5 +29,3 @@
         fi
       loop: "{{ running_containers.stdout_lines }}"
       # changed_when: true # Assume change, or add more complex check if needed
-      # You might want to remove changed_when: true if you want more accurate reporting
-      # but it's fine for simple tasks like this.
