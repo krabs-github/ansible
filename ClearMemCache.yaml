@@ -1,6 +1,6 @@
 ---
 - name: Flush RAM Cache Immediately on Host
-  hosts: your_host_group
+  hosts: all
   become: true
 
   tasks:
