@@ -49,14 +49,16 @@
 
     - name: Generate clean updated containers report
       ansible.builtin.debug:
-        msg: >-
-          Server: {{ inventory_hostname }}
-          Updated Stacks: {{ compose_update.results | selectattr('changed', 'equalto', true) | map(attribute='item.path') | map('dirname') | map('basename') | list }}
+        msg: |
+          {{ inventory_hostname }}
+          {% for item in compose_update.results | selectattr('changed', 'equalto', true) %}
+          Updated: {{ item.item.path | dirname | basename }}
+          {% endfor %}
       when: compose_update.results | selectattr('changed', 'equalto', true) | list | length > 0
 
     - name: Generate clean no-change report
       ansible.builtin.debug:
-        msg: >-
-          Server: {{ inventory_hostname }}
+        msg: |
+          {{ inventory_hostname }}
           Status: No changes made. All stacks already configured with TZ={{ timezone }}.
       when: compose_update.results | selectattr('changed', 'equalto', true) | list | length == 0
