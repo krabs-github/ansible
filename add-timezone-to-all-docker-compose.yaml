@@ -11,8 +11,8 @@
     - name: Find all docker-compose.yaml files in first-level subdirectories
       ansible.builtin.find:
         paths: "{{ target_dir }}"
-        recurse: no
-        depth: 3
+        recurse: yes
+        depth: 2
         patterns: "docker-compose.yaml"
       register: compose_files
 
