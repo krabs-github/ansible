@@ -47,14 +47,16 @@
         label: "{{ item.item.path }}"
       when: item.changed
 
-    - name: Generate updated containers report
+    - name: Generate clean updated containers report
       ansible.builtin.debug:
         msg: >-
-          [{{ inventory_hostname }}] were updated and restarted:
-          {{ compose_update.results | selectattr('changed', 'equalto', true) | map(attribute='item.path') | list }}
+          Server: {{ inventory_hostname }}
+          Updated Stacks: {{ compose_update.results | selectattr('changed', 'equalto', true) | map(attribute='item.path') | map('dirname') | map('basename') | list }}
       when: compose_update.results | selectattr('changed', 'equalto', true) | list | length > 0
 
-    - name: Generate no-change report
+    - name: Generate clean no-change report
       ansible.builtin.debug:
-        msg: "No changes made on host [{{ inventory_hostname }}]. All files already contain the TZ={{ timezone }} code."
+        msg: >-
+          Server: {{ inventory_hostname }}
+          Status: No changes made. All stacks already configured with TZ={{ timezone }}.
       when: compose_update.results | selectattr('changed', 'equalto', true) | list | length == 0
