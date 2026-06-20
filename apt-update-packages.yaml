@@ -6,12 +6,11 @@
 - name: Update and upgrade apt packages on ALL SERVERS EXCEPT NTFY SERVER
   hosts: all:!server01.krabs.me
   become: true
-
   environment:
     DEBIAN_FRONTEND: noninteractive
     NEEDRESTART_MODE: a
+    NEEDRESTART_SUSPEND: '1'
     LC_ALL: C
-
   tasks:
     # -------------------------------------------------------------------------
     # 1. PRE-CLEANUP
@@ -29,7 +28,6 @@
       when: ansible_pkg_mgr == 'apt'
       changed_when: false
       ignore_errors: true
-      delay: 5
 
     # -------------------------------------------------------------------------
     # 2. UPDATE & UPGRADE
@@ -61,30 +59,28 @@
 
     - name: Send ntfy.sh update (if reboot is required)
       ansible.builtin.uri:
-        url: "https://ntfy.krabs.me/Alerts"
+        url: "https://krabs.me"
         method: POST
         body: "{{ inventory_hostname }} is being rebooted after system update."
         timeout: 10
       when: reboot_required_file.stat.exists == true
 
-    # This 'meta: reset_connection' task CANNOT be conditional.
-    # It will always run if Ansible processes this point in the playbook.
-    # Its placement directly before the reboot task ensures it's useful
-    # when a reboot IS required. When a reboot is NOT required, the
-    # subsequent reboot task's 'when' condition will skip the reboot itself,
-    # and the connection reset will likely have no adverse effect.
-    - name: Reset connection to avoid ssh persistence issues before reboot
-      meta: reset_connection
-
-    - name: Reboot the server (if required)
-      ansible.builtin.reboot:
-        msg: "Rebooting due to system updates"
-        pre_reboot_delay: 5
-        post_reboot_delay: 10
-        reboot_timeout: 600
+    # Asynchronous reboot block prevents Ansible from hanging on SSH drops
+    - name: Handle server reboot sequence
       when: reboot_required_file.stat.exists == true
-      delay: 15
+      block:
+        - name: Reset connection to avoid ssh persistence issues before reboot
+          meta: reset_connection
 
+        - name: Trigger detached reboot command
+          ansible.builtin.shell: "sleep 2 && shutdown -r now"
+          async: 1
+          poll: 0
+
+        - name: Wait for servers to come back online
+          ansible.builtin.wait_for_connection:
+            delay: 20
+            timeout: 600
 
 # =========================================================================
 # PLAY 2: Update and upgrade apt packages on NTFY SERVER (server01.krabs.me)
@@ -93,12 +89,11 @@
 - name: Update and upgrade apt packages on NTFY SERVER
   hosts: server01.krabs.me
   become: true
-
   environment:
     DEBIAN_FRONTEND: noninteractive
     NEEDRESTART_MODE: a
+    NEEDRESTART_SUSPEND: '1'
     LC_ALL: C
-
   tasks:
     # -------------------------------------------------------------------------
     # 1. PRE-CLEANUP
@@ -116,7 +111,6 @@
       when: ansible_pkg_mgr == 'apt'
       changed_when: false
       ignore_errors: true
-      delay: 5
 
     # -------------------------------------------------------------------------
     # 2. UPDATE & UPGRADE
@@ -151,16 +145,19 @@
         msg: "server01.krabs.me requires a reboot but will not send an ntfy notification via its own ntfy service."
       when: reboot_required_file.stat.exists == true
 
-    # This 'meta: reset_connection' task CANNOT be conditional.
-    # It will always run if Ansible processes this point in the playbook.
-    - name: Reset connection to avoid ssh persistence issues before reboot
-      meta: reset_connection
-
-    - name: Reboot the server (if required)
-      ansible.builtin.reboot:
-        msg: "Rebooting due to system updates"
-        pre_reboot_delay: 5
-        post_reboot_delay: 10
-        reboot_timeout: 600
+    # Asynchronous reboot block prevents Ansible from hanging on SSH drops
+    - name: Handle ntfy server reboot sequence
       when: reboot_required_file.stat.exists == true
-      delay: 15
+      block:
+        - name: Reset connection to avoid ssh persistence issues before reboot
+          meta: reset_connection
+
+        - name: Trigger detached reboot command
+          ansible.builtin.shell: "sleep 2 && shutdown -r now"
+          async: 1
+          poll: 0
+
+        - name: Wait for ntfy server to come back online
+          ansible.builtin.wait_for_connection:
+            delay: 20
+            timeout: 600
