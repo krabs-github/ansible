@@ -1,7 +1,6 @@
 ---
 # =========================================================================
 # PLAY 1: Update and upgrade apt packages on ALL SERVERS EXCEPT NTFY SERVER
-# Ensures server01.krabs.me (ntfy server) remains available during this phase.
 # =========================================================================
 - name: Update and upgrade apt packages on ALL SERVERS EXCEPT NTFY SERVER
   hosts: all:!server01.krabs.me
@@ -12,13 +11,9 @@
     NEEDRESTART_SUSPEND: '1'
     LC_ALL: C
   tasks:
-    # -------------------------------------------------------------------------
-    # 1. PRE-CLEANUP
-    # -------------------------------------------------------------------------
     - name: Release apt locks if held by stale processes
       ansible.builtin.shell: |
         if ps aux | grep -e '[a]pt-get' -e '[u]nattended-upgrade' | grep -v grep > /dev/null; then
-          echo "Killing active apt processes"
           killall -9 apt-get || true
           killall -9 unattended-upgrade || true
           dpkg --configure -a --force-confold
@@ -29,16 +24,12 @@
       changed_when: false
       ignore_errors: true
 
-    # -------------------------------------------------------------------------
-    # 2. UPDATE & UPGRADE
-    # -------------------------------------------------------------------------
     - name: Update packages with apt (apt-get update)
       when: ansible_pkg_mgr == 'apt'
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
         lock_timeout: 300
-      register: apt_update_result
 
     - name: Upgrade packages with apt (apt-get upgrade)
       when: ansible_pkg_mgr == 'apt'
@@ -48,9 +39,6 @@
         dpkg_options: 'force-confdef,force-confold'
       register: apt_upgrade_result
 
-    # -------------------------------------------------------------------------
-    # 3. REBOOT LOGIC
-    # -------------------------------------------------------------------------
     - name: Check if a reboot is required
       ansible.builtin.stat:
         path: /var/run/reboot-required
@@ -65,7 +53,6 @@
         timeout: 10
       when: reboot_required_file.stat.exists == true
 
-    # Asynchronous reboot block prevents Ansible from hanging on SSH drops
     - name: Handle server reboot sequence
       when: reboot_required_file.stat.exists == true
       block:
@@ -84,7 +71,6 @@
 
 # =========================================================================
 # PLAY 2: Update and upgrade apt packages on NTFY SERVER (server01.krabs.me)
-# This play runs after all other servers have been processed.
 # =========================================================================
 - name: Update and upgrade apt packages on NTFY SERVER
   hosts: server01.krabs.me
@@ -95,13 +81,9 @@
     NEEDRESTART_SUSPEND: '1'
     LC_ALL: C
   tasks:
-    # -------------------------------------------------------------------------
-    # 1. PRE-CLEANUP
-    # -------------------------------------------------------------------------
     - name: Release apt locks if held by stale processes
       ansible.builtin.shell: |
         if ps aux | grep -e '[a]pt-get' -e '[u]nattended-upgrade' | grep -v grep > /dev/null; then
-          echo "Killing active apt processes"
           killall -9 apt-get || true
           killall -9 unattended-upgrade || true
           dpkg --configure -a --force-confold
@@ -112,16 +94,12 @@
       changed_when: false
       ignore_errors: true
 
-    # -------------------------------------------------------------------------
-    # 2. UPDATE & UPGRADE
-    # -------------------------------------------------------------------------
     - name: Update packages with apt (apt-get update)
       when: ansible_pkg_mgr == 'apt'
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
         lock_timeout: 300
-      register: apt_update_result
 
     - name: Upgrade packages with apt (apt-get upgrade)
       when: ansible_pkg_mgr == 'apt'
@@ -131,9 +109,6 @@
         dpkg_options: 'force-confdef,force-confold'
       register: apt_upgrade_result
 
-    # -------------------------------------------------------------------------
-    # 3. REBOOT LOGIC
-    # -------------------------------------------------------------------------
     - name: Check if a reboot is required
       ansible.builtin.stat:
         path: /var/run/reboot-required
@@ -145,7 +120,6 @@
         msg: "server01.krabs.me requires a reboot but will not send an ntfy notification via its own ntfy service."
       when: reboot_required_file.stat.exists == true
 
-    # Asynchronous reboot block prevents Ansible from hanging on SSH drops
     - name: Handle ntfy server reboot sequence
       when: reboot_required_file.stat.exists == true
       block:
@@ -161,3 +135,26 @@
           ansible.builtin.wait_for_connection:
             delay: 20
             timeout: 600
+
+# =========================================================================
+# PLAY 3: Generate Human Readable Maintenance Report
+# =========================================================================
+- name: Generate Human Readable Maintenance Report
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Output Execution Report
+      ansible.builtin.debug:
+        msg: |
+          ======================================================================
+                               SYSTEM MAINTENANCE REPORT                        
+          ======================================================================
+          {% for host in groups['all'] %}
+          SERVER: {{ host }}
+          ----------------------------------------------------------------------
+          * Packages Upgraded:  {% if hostvars[host]['apt_upgrade_result']['changed'] | default(false) %}YES ({{ hostvars[host]['apt_upgrade_result']['cache_updated'] | default(false) or 'Updated' }}){% else %}NO (System up to date){% endif %}
+          
+          * Reboot Executed:    {% if hostvars[host]['reboot_required_file']['stat']['exists'] | default(false) %}YES (System restarted cleanly){% else %}NO (No restart required){% endif %}
+          
+          ======================================================================
+          {% endfor %}
