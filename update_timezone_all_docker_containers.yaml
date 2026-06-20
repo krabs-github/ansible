@@ -5,7 +5,7 @@
     - server04.krabs.me
   become: yes
   vars:
-    # Add any container names you want to skip here
+    # Centralized list to manually exclude specific container names
     skipped_containers:
       - "portainer_agent"
       - "another_container_to_skip"
@@ -52,7 +52,16 @@
           # 1. ALPINE DETECTION & CONFIGURATION
           if docker exec "$CONTAINER_ID" grep -qi "alpine" /etc/os-release >/dev/null 2>&1; then
               echo " Method: Configuring Alpine Linux for $CONTAINER_NAME"
+              
+              # Gracefully skip if the container filesystem is mounted as read-only
+              if ! docker exec -u 0 "$CONTAINER_ID" sh -c "touch /etc/timezone" >/dev/null 2>&1; then
+                  echo " WARNING: Container '$CONTAINER_NAME' filesystem is Read-Only. Cannot modify timezone in-place."
+                  exit 0
+              fi
+
               docker exec -u 0 "$CONTAINER_ID" apk add --no-cache tzdata >/dev/null
+              # Remove old files first to avoid 'File exists' errors
+              docker exec -u 0 "$CONTAINER_ID" rm -f /etc/localtime
               docker exec -u 0 "$CONTAINER_ID" cp "$ZONEINFO_PATH" /etc/localtime
               docker exec -u 0 "$CONTAINER_ID" sh -c "echo '$TARGET_TIMEZONE' > /etc/timezone"
 
@@ -63,7 +72,8 @@
               
           elif docker exec "$CONTAINER_ID" test -f /etc/timezone; then
               echo " Method: Manually setting timezone via /etc/timezone (Ubuntu/Debian style) for $CONTAINER_NAME"
-              docker exec -u 0 "$CONTAINER_ID" sh -c "echo '$TARGET_TIMEZONE' > /etc/timezone && cp \"$ZONEINFO_PATH\" /etc/localtime"
+              # Remove old files first to prevent conflicts with pre-existing symlinks
+              docker exec -u 0 "$CONTAINER_ID" sh -c "rm -f /etc/localtime && echo '$TARGET_TIMEZONE' > /etc/timezone && cp \"$ZONEINFO_PATH\" /etc/localtime"
               
           elif docker exec "$CONTAINER_ID" test -d /usr/share/zoneinfo/"$(dirname "$TARGET_TIMEZONE")"; then
               echo " Method: Setting timezone via /etc/localtime symlink for $CONTAINER_NAME"
@@ -90,7 +100,7 @@
               exit 0
           fi
 
-          # Check if the container name matches the exclusion list to skip reporting
+          # Skip reporting for explicitly excluded containers
           for skip_name in $SKIPPED_LIST; do
               if [ "$CONTAINER_NAME" = "$skip_name" ]; then
                   exit 0
@@ -125,5 +135,5 @@
         msg: "{{ item.stdout_lines }}"
       loop: "{{ timezone_report.results }}"
       loop_control:
-        label: "{{ item.item.split('\t')[1] | default(item.item) }}"
+        label: "{{ item.item.split('\t') | default(item.item) }}"
       when: item.skipped is not defined and item.stdout_lines is defined and item.stdout_lines | length > 0
