@@ -12,7 +12,7 @@
       ansible.builtin.find:
         paths: "{{ target_dir }}"
         recurse: no
-        depth: 2
+        depth: 3
         patterns: "docker-compose.yaml"
       register: compose_files
 
