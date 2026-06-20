@@ -14,6 +14,9 @@
         recurse: yes
         depth: 2
         patterns: "docker-compose.yaml"
+        # Bypasses the directory of the runner to prevent a self-restart crash
+        excludes:
+          - "ansible-semaphore"
       register: compose_files
 
     - name: Create a backup of each docker-compose.yaml file on the remote target
