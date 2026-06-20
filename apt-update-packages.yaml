@@ -11,7 +11,7 @@
     NEEDRESTART_MODE: a
     NEEDRESTART_SUSPEND: '1'
     LC_ALL: C
-    ANSIBLE_DEPRECATION_WARNINGS: 'False'  # Suppresses deprecation warnings
+    ANSIBLE_DEPRECATION_WARNINGS: 'False'
   tasks:
     - name: Release apt locks if held by stale processes
       ansible.builtin.shell: |
@@ -82,7 +82,7 @@
     NEEDRESTART_MODE: a
     NEEDRESTART_SUSPEND: '1'
     LC_ALL: C
-    ANSIBLE_DEPRECATION_WARNINGS: 'False'  # Suppresses deprecation warnings
+    ANSIBLE_DEPRECATION_WARNINGS: 'False'
   tasks:
     - name: Release apt locks if held by stale processes
       ansible.builtin.shell: |
@@ -140,11 +140,12 @@
             timeout: 600
 
 # =========================================================================
-# PLAY 3: Generate Human Readable Maintenance Report
+# PLAY 3: Generate Human Readable Maintenance Report (Runs on remote host)
 # =========================================================================
 - name: Generate Human Readable Maintenance Report
-  hosts: localhost
+  hosts: all
   gather_facts: false
+  run_once: true  # Executes exactly once on a single remote machine from inventory
   tasks:
     - name: Output Execution Report
       ansible.builtin.debug:
