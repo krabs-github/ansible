@@ -14,9 +14,6 @@
         recurse: yes
         depth: 2
         patterns: "docker-compose.yaml"
-        # Bypasses the directory of the runner to prevent a self-restart crash
-        excludes:
-          - "ansible-semaphore"
       register: compose_files
 
     - name: Create a backup of each docker-compose.yaml file on the remote target
@@ -24,7 +21,8 @@
         src: "{{ item.path }}"
         dest: "{{ item.path }}.{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}{{ ansible_date_time.second }}.bak"
         remote_src: yes
-      loop: "{{ compose_files.files }}"
+      # Filters the file list to drop any path containing 'ansible-semaphore'
+      loop: "{{ compose_files.files | rejectattr('path', 'search', 'ansible-semaphore') | list }}"
       loop_control:
         label: "{{ item.path }}"
 
@@ -34,7 +32,8 @@
         insertafter: '^[ \t]*environment:[ \t]*$'
         line: "      - TZ={{ timezone }}"
         state: present
-      loop: "{{ compose_files.files }}"
+      # Filters the file list to drop any path containing 'ansible-semaphore'
+      loop: "{{ compose_files.files | rejectattr('path', 'search', 'ansible-semaphore') | list }}"
       loop_control:
         label: "{{ item.path }}"
       register: compose_update
