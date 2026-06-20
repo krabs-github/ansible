@@ -20,6 +20,7 @@
     - name: Debug - Show raw output from docker ps (for troubleshooting)
       ansible.builtin.debug:
         var: running_containers.stdout_lines
+        verbosity: 1
 
     - name: Set timezone in each running container
       when: running_containers.stdout_lines is defined and running_containers.stdout_lines | length > 0
@@ -35,60 +36,53 @@
           ZONEINFO_PATH="/usr/share/zoneinfo/$TARGET_TIMEZONE"
 
           if [ -z "$CONTAINER_ID" ] || [ -z "$CONTAINER_NAME" ]; then
-              echo "Skipping malformed line: '$LINE' - Missing ID or Name after parsing."
               exit 0
           fi
 
           # Check if the container name matches the exclusion list
           for skip_name in $SKIPPED_LIST; do
               if [ "$CONTAINER_NAME" = "$skip_name" ]; then
-                  echo "Skipping container '$CONTAINER_NAME' as requested in skip list."
+                  echo "STATUS: UNCHANGED (Excluded via skip list)"
                   exit 0
               fi
           done
 
-          echo "Processing container: $CONTAINER_NAME ($CONTAINER_ID)"
-
           # 0. DISTROLESS / SCRATCH ENVIRONMENT SANITY CHECK
-          # If the container cannot even run basic exec commands, skip it entirely
           if ! docker exec "$CONTAINER_ID" true >/dev/null 2>&1 && ! docker exec "$CONTAINER_ID" sh -c "true" >/dev/null 2>&1; then
-              echo " WARNING: Container '$CONTAINER_NAME' is minimal/distroless (no usable shell). Skipping config."
+              echo "STATUS: UNCHANGED (Distroless / No internal shell)"
               exit 0
           fi
 
           # 1. ALPINE DETECTION & CONFIGURATION
           if docker exec "$CONTAINER_ID" grep -qi "alpine" /etc/os-release >/dev/null 2>&1; then
-              echo " Method: Configuring Alpine Linux for $CONTAINER_NAME"
-              
-              # Gracefully skip if the container filesystem is mounted as read-only
               if ! docker exec -u 0 "$CONTAINER_ID" sh -c "touch /etc/timezone" >/dev/null 2>&1; then
-                  echo " WARNING: Container '$CONTAINER_NAME' filesystem is Read-Only. Cannot modify timezone in-place."
+                  echo "STATUS: UNCHANGED (Read-Only Filesystem)"
                   exit 0
               fi
 
-              docker exec -u 0 "$CONTAINER_ID" apk add --no-cache tzdata >/dev/null
-              # Remove old files first to avoid 'File exists' errors
+              docker exec -u 0 "$CONTAINER_ID" apk add --no-cache tzdata >/dev/null 2>&1
               docker exec -u 0 "$CONTAINER_ID" rm -f /etc/localtime
               docker exec -u 0 "$CONTAINER_ID" cp "$ZONEINFO_PATH" /etc/localtime
               docker exec -u 0 "$CONTAINER_ID" sh -c "echo '$TARGET_TIMEZONE' > /etc/timezone"
+              echo "STATUS: CHANGED"
 
           # 2. UBUNTU / DEBIAN / FALLBACK METHODS
           elif docker exec "$CONTAINER_ID" command -v setup-timezone >/dev/null 2>&1; then
-              echo " Method: Using 'setup-timezone' for $CONTAINER_NAME"
-              docker exec -u 0 "$CONTAINER_ID" setup-timezone -z "$TARGET_TIMEZONE"
+              docker exec -u 0 "$CONTAINER_ID" setup-timezone -z "$TARGET_TIMEZONE" >/dev/null 2>&1
+              echo "STATUS: CHANGED"
               
           elif docker exec "$CONTAINER_ID" test -f /etc/timezone; then
-              echo " Method: Manually setting timezone via /etc/timezone (Ubuntu/Debian style) for $CONTAINER_NAME"
-              # Remove old files first to prevent conflicts with pre-existing symlinks
-              docker exec -u 0 "$CONTAINER_ID" sh -c "rm -f /etc/localtime && echo '$TARGET_TIMEZONE' > /etc/timezone && cp \"$ZONEINFO_PATH\" /etc/localtime"
+              docker exec -u 0 "$CONTAINER_ID" sh -c "rm -f /etc/localtime && echo '$TARGET_TIMEZONE' > /etc/timezone && cp \"$ZONEINFO_PATH\" /etc/localtime" >/dev/null 2>&1
+              echo "STATUS: CHANGED"
               
           elif docker exec "$CONTAINER_ID" test -d /usr/share/zoneinfo/"$(dirname "$TARGET_TIMEZONE")"; then
-              echo " Method: Setting timezone via /etc/localtime symlink for $CONTAINER_NAME"
-              docker exec -u 0 "$CONTAINER_ID" sh -c "rm -f /etc/localtime && ln -sf \"$ZONEINFO_PATH\" /etc/localtime"
+              docker exec -u 0 "$CONTAINER_ID" sh -c "rm -f /etc/localtime && ln -sf \"$ZONEINFO_PATH\" /etc/localtime" >/dev/null 2>&1
+              echo "STATUS: CHANGED"
               
           else
-              echo " Could not determine a suitable timezone setup method or zoneinfo files for $CONTAINER_NAME. Skipping."
+              echo "STATUS: UNCHANGED (No configuration method found)"
           fi
+      register: timezone_change_status
       changed_when: false
 
     - name: Report current timezone for each container
@@ -101,24 +95,19 @@
           LINE="{{ item }}"
           CONTAINER_ID=$(echo "$LINE" | cut -f1)
           CONTAINER_NAME=$(echo "$LINE" | cut -f2)
+          
+          CURRENT_DATE="[Cannot read time internally]"
 
-          if [ -z "$CONTAINER_ID" ] || [ -z "$CONTAINER_NAME" ]; then
-              echo "Skipping malformed line for reporting: '$LINE'"
-              exit 0
-          fi
-
-          # Skip reporting for explicitly excluded containers
+          # Check exclusions to stay silent or return static labels
           for skip_name in $SKIPPED_LIST; do
               if [ "$CONTAINER_NAME" = "$skip_name" ]; then
+                  echo "TIME: N/A"
                   exit 0
               fi
           done
 
-          echo "Container '$CONTAINER_NAME' (ID: $CONTAINER_ID):"
-
-          # Safety check for scratch/distroless containers lacking binary utilities or system paths
           if ! docker exec "$CONTAINER_ID" true >/dev/null 2>&1 && ! docker exec "$CONTAINER_ID" sh -c "true" >/dev/null 2>&1; then
-              echo " WARNING: Exec utilities missing. Cannot report timezone on minimal/distroless images."
+              echo "TIME: N/A"
               exit 0
           fi
 
@@ -134,19 +123,40 @@
           fi
 
           if [ -n "$DATE_CMD" ]; then
-              echo " Running: docker exec -u 0 \"$CONTAINER_ID\" $DATE_CMD"
-              docker exec -u 0 "$CONTAINER_ID" $DATE_CMD
-          else
-              echo " WARNING: 'date' command (or busybox) not found in container. Cannot report timezone."
-              exit 0
+              CURRENT_DATE=$(docker exec -u 0 "$CONTAINER_ID" $DATE_CMD 2>/dev/null)
           fi
+          
+          echo "TIME: $CURRENT_DATE"
       register: timezone_report
       changed_when: false
 
-    - name: Display timezone report
+    - name: Display human-readable sorted timezone report
       ansible.builtin.debug:
-        msg: "{{ item.stdout_lines }}"
-      loop: "{{ timezone_report.results }}"
-      loop_control:
-        label: "{{ item.item.split('\t') | default(item.item) }}"
-      when: item.skipped is not defined and item.stdout_lines is defined and item.stdout_lines | length > 0
+        msg: |
+          ======================================================================
+                         CONTAINER TIMEZONE REPORT (ALPHABETICAL)
+          ======================================================================
+          {# 1. Build a structured list of container objects #}
+          {% set container_list = [] %}
+          {% for run in timezone_report.results if run.skipped is not defined %}
+            {% set name = run.item.split('\t')[1] | default('Unknown') %}
+            {% set id = run.item.split('\t')[0] | default('Unknown') %}
+            {% set time_line = run.stdout_lines | select('match', '^TIME: .*') | first | default('TIME: N/A') %}
+            {% set time_val = time_line | replace('TIME: ', '') %}
+            
+            {% set change_task = timezone_change_status.results[loop.index0] %}
+            {% set status_line = change_task.stdout_lines | select('match', '^STATUS: .*') | first | default('STATUS: OK') %}
+            {% set status_val = status_line | replace('STATUS: ', '') %}
+            
+            {% set _ = container_list.append({'name': name, 'id': id, 'time': time_val, 'status': status_val}) %}
+          {% endfor %}
+          
+          {# 2. Loop through the built list, sorting by the 'name' attribute #}
+          {% for container in container_list | sort(attribute='name') %}
+          Container Name : {{ container.name }}
+          Container ID   : {{ container.id }}
+          Current Time   : {{ container.time }}
+          Final Status   : {{ container.status }}
+          ----------------------------------------------------------------------
+          {% endfor %}
+      when: timezone_report.results is defined
