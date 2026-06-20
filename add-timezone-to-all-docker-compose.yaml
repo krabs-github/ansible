@@ -26,34 +26,63 @@
       loop_control:
         label: "{{ item.path }}"
 
-    - name: Append TZ environment variable safely via inline Python data parsing
+    - name: Append TZ environment variable safely via native inline Python lines manipulation
       ansible.builtin.shell: |
         python3 -c "
-        import yaml, sys
+        import sys
         path = '{{ item.path }}'
         with open(path, 'r') as f:
-            data = yaml.safe_load(f) or {}
+            lines = f.readlines()
         
+        output = []
         changed = False
-        services = data.get('services', {})
-        for name, svc in services.items():
-            if 'environment' not in svc or svc['environment'] is None:
-                svc['environment'] = []
-            
-            env = svc['environment']
-            if isinstance(env, dict):
-                if env.get('TZ') != '{{ timezone }}':
-                    env['TZ'] = '{{ timezone }}'
-                    changed = True
-            elif isinstance(env, list):
-                has_tz = any(isinstance(x, str) and x.startswith('TZ=') for x in env)
-                if not has_tz:
-                    env.append('TZ={{ timezone }}')
-                    changed = True
+        in_env_block = False
+        env_indent = 0
+        has_tz = False
         
+        # Scan if file already contains our exact timezone configuration
+        content_str = ''.join(lines)
+        if 'TZ={{ timezone }}' in content_str:
+            sys.exit(0)
+            
+        for line in lines:
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip())
+            
+            # If we were tracking an environment block, check if it just ended
+            if in_env_block and stripped and indent <= env_indent and not stripped.startswith('-'):
+                if not has_tz:
+                    output.append(' ' * (env_indent + 2) + '- TZ={{ timezone }}\n')
+                    changed = True
+                in_env_block = False
+                has_tz = False
+                
+            output.append(line)
+            
+            # Check if this line opens up a service environment layout block
+            if stripped.startswith('environment:'):
+                in_env_block = True
+                env_indent = indent
+                has_tz = False
+                # Handle single line short form declarations like: environment: []
+                if stripped.endswith('[]') or stripped.endswith('{}'):
+                    output.pop()
+                    output.append(' ' * indent + 'environment:\n')
+                    output.append(' ' * (indent + 2) + '- TZ={{ timezone }}\n')
+                    changed = True
+                    in_env_block = False
+            
+            if in_env_block and ('TZ=' in stripped or 'TZ:' in stripped):
+                has_tz = True
+                
+        # Catch lingering environments sitting directly at the absolute end of files
+        if in_env_block and not has_tz:
+            output.append(' ' * (env_indent + 2) + '- TZ={{ timezone }}\n')
+            changed = True
+            
         if changed:
             with open(path, 'w') as f:
-                yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+                f.writelines(output)
             print('STACK_CHANGED')
         "
       # Safely checks the stdout text loop data directly instead of its return code
