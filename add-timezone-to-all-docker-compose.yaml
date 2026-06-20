@@ -26,12 +26,39 @@
       loop_control:
         label: "{{ item.path }}"
 
-    - name: Append TZ environment variable to services
-      ansible.builtin.lineinfile:
-        path: "{{ item.path }}"
-        insertafter: '^[ \t]*environment:[ \t]*$'
-        line: "      - TZ={{ timezone }}"
-        state: present
+    - name: Append TZ environment variable safely via inline Python data parsing
+      ansible.builtin.shell: |
+        python3 -c "
+        import yaml, sys
+        path = '{{ item.path }}'
+        with open(path, 'r') as f:
+            data = yaml.safe_load(f) or {}
+        
+        changed = False
+        services = data.get('services', {})
+        for name, svc in services.items():
+            if 'environment' not in svc or svc['environment'] is None:
+                svc['environment'] = []
+            
+            env = svc['environment']
+            if isinstance(env, dict):
+                if env.get('TZ') != '{{ timezone }}':
+                    env['TZ'] = '{{ timezone }}'
+                    changed = True
+            elif isinstance(env, list):
+                has_tz = any(isinstance(x, str) and x.startswith('TZ=') for x in env)
+                if not has_tz:
+                    env.append('TZ={{ timezone }}')
+                    changed = True
+        
+        if changed:
+            with open(path, 'w') as f:
+                yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+            sys.exit(10) # Custom return code to let Ansible know a structural change happened
+        "
+      register: python_update
+      failed_when: python_update.rc != 0 and python_update.rc != 10
+      changed_when: python_update.rc == 10
       # Drops any paths containing 'ansible-semaphore' or 'nginx-proxy-manager'
       loop: "{{ compose_files.files | rejectattr('path', 'regex', 'ansible-semaphore|nginx-proxy-manager') | list }}"
       loop_control:
