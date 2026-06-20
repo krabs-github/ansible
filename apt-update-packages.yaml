@@ -1,6 +1,7 @@
 ---
 # =========================================================================
 # PLAY 1: Update and upgrade apt packages on ALL SERVERS EXCEPT NTFY SERVER
+# Ensures server01.krabs.me (ntfy server) remains available during this phase.
 # =========================================================================
 - name: Update and upgrade apt packages on ALL SERVERS EXCEPT NTFY SERVER
   hosts: all:!server01.krabs.me
@@ -10,6 +11,7 @@
     NEEDRESTART_MODE: a
     NEEDRESTART_SUSPEND: '1'
     LC_ALL: C
+    ANSIBLE_DEPRECATION_WARNINGS: 'False'  # Suppresses deprecation warnings
   tasks:
     - name: Release apt locks if held by stale processes
       ansible.builtin.shell: |
@@ -80,6 +82,7 @@
     NEEDRESTART_MODE: a
     NEEDRESTART_SUSPEND: '1'
     LC_ALL: C
+    ANSIBLE_DEPRECATION_WARNINGS: 'False'  # Suppresses deprecation warnings
   tasks:
     - name: Release apt locks if held by stale processes
       ansible.builtin.shell: |
@@ -149,12 +152,16 @@
           ======================================================================
                                SYSTEM MAINTENANCE REPORT                        
           ======================================================================
-          {% for host in groups['all'] %}
+          {% for host in ansible_play_hosts_all %}
           SERVER: {{ host }}
           ----------------------------------------------------------------------
-          * Packages Upgraded:  {% if hostvars[host]['apt_upgrade_result']['changed'] | default(false) %}YES ({{ hostvars[host]['apt_upgrade_result']['cache_updated'] | default(false) or 'Updated' }}){% else %}NO (System up to date){% endif %}
-          
+          {% if host not in groups['all'] or hostvars[host] is not defined or hostvars[host]['reboot_required_file'] is not defined %}
+          * Status:             ❌ FAILED / UNREACHABLE
+          * Details:            Check earlier job logs for the specific error.
+          {% else %}
+          * Status:             ✅ SUCCESS
+          * Packages Upgraded:  {% if hostvars[host]['apt_upgrade_result']['changed'] | default(false) %}YES{% else %}NO (System up to date){% endif %}
           * Reboot Executed:    {% if hostvars[host]['reboot_required_file']['stat']['exists'] | default(false) %}YES (System restarted cleanly){% else %}NO (No restart required){% endif %}
-          
+          {% endif %}
           ======================================================================
           {% endfor %}
