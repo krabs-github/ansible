@@ -1,25 +1,25 @@
 ---
-- name: Backup, add timezone, restart stacks, and report changes
-  hosts: all
+- name: Remote backup, add timezone, restart stacks, and report changes
+  hosts: all     # <-- Replace this with your inventory group name
   become: true
+  gather_facts: yes          # <-- Required to pull timestamps from the remote machine
   vars:
     target_dir: /krabs-data/krabs-docker
     timezone: "America/New_York"
-    # Generates a timestamp (e.g., 20260620-090415)
-    timestamp: "{{ lookup('pipe', 'date +%Y%m%d-%H%M%S') }}"
 
   tasks:
-    - name: Find all docker-compose.yaml files in subdirectories
+    - name: Find all docker-compose.yaml files in first-level subdirectories
       ansible.builtin.find:
         paths: "{{ target_dir }}"
-        recurse: yes
+        recurse: no
+        depth: 2
         patterns: "docker-compose.yaml"
       register: compose_files
 
-    - name: Create a backup of each docker-compose.yaml file
+    - name: Create a backup of each docker-compose.yaml file on the remote target
       ansible.builtin.copy:
         src: "{{ item.path }}"
-        dest: "{{ item.path }}.{{ timestamp }}.bak"
+        dest: "{{ item.path }}.{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}{{ ansible_date_time.second }}.bak"
         remote_src: yes
       loop: "{{ compose_files.files }}"
       loop_control:
@@ -50,11 +50,11 @@
     - name: Generate updated containers report
       ansible.builtin.debug:
         msg: >-
-          The following compose files were successfully updated with TZ={{ timezone }} and restarted:
+          The following compose files on host [{{ inventory_hostname }}] were updated with TZ={{ timezone }} and restarted:
           {{ compose_update.results | selectattr('changed', 'equalto', true) | map(attribute='item.path') | list }}
       when: compose_update.results | selectattr('changed', 'equalto', true) | list | length > 0
 
     - name: Generate no-change report
       ansible.builtin.debug:
-        msg: "No changes made. All files already contain the TZ={{ timezone }} code."
+        msg: "No changes made on host [{{ inventory_hostname }}]. All files already contain the TZ={{ timezone }} code."
       when: compose_update.results | selectattr('changed', 'equalto', true) | list | length == 0
