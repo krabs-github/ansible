@@ -1,7 +1,7 @@
 ---
 - name: Backup, add timezone, restart stacks, and report changes
-  hosts: localhost
-  connection: local
+  hosts: all
+ 
   vars:
     target_dir: /krabs-data/krabs-docker
     timezone: "America/New_York"
