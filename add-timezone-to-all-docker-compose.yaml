@@ -1,39 +1,60 @@
 ---
-- name: Update Portainer
-  hosts: all
-  become: true
+- name: Backup, add timezone, restart stacks, and report changes
+  hosts: localhost
+  connection: local
+  vars:
+    target_dir: /krabs-data/krabs-docker
+    timezone: "America/New_York"
+    # Generates a timestamp (e.g., 20260620-090415)
+    timestamp: "{{ lookup('pipe', 'date +%Y%m%d-%H%M%S') }}"
 
   tasks:
-    # 1. Pull the image FIRST. 
-    # If this fails, the script stops here and your existing Portainer stays alive.
-    - name: Pull latest Portainer image
-      command: docker pull portainer/portainer-ce:latest
-      register: docker_pull
-      # Only mark 'changed' if a new layer was downloaded
-      changed_when: "'Downloaded newer image' in docker_pull.stdout"
+    - name: Find all docker-compose.yaml files in subdirectories
+      ansible.builtin.find:
+        paths: "{{ target_dir }}"
+        recurse: yes
+        patterns: "docker-compose.yaml"
+      register: compose_files
 
-    # 2. Only stop if we downloaded a new image
-    - name: Stop Portainer
-      command: docker stop portainer
-      ignore_errors: yes 
-      when: docker_pull.changed
+    - name: Create a backup of each docker-compose.yaml file
+      ansible.builtin.copy:
+        src: "{{ item.path }}"
+        dest: "{{ item.path }}.{{ timestamp }}.bak"
+        remote_src: yes
+      loop: "{{ compose_files.files }}"
+      loop_control:
+        label: "{{ item.path }}"
 
-    # 3. Only remove if we downloaded a new image
-    - name: Remove Old Portainer
-      command: docker rm portainer
-      ignore_errors: yes
-      when: docker_pull.changed
+    - name: Append TZ environment variable to services
+      ansible.builtin.lineinfile:
+        path: "{{ item.path }}"
+        insertafter: '^[ \t]*environment:[ \t]*$'
+        line: "      - TZ={{ timezone }}"
+        state: present
+      loop: "{{ compose_files.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: compose_update
 
-    # 4. Start only if updated OR if it doesn't exist (fail-safe)
-    - name: Start Portainer
-      command: >
-        docker run -d 
-        -p 8000:8000 
-        -p 9443:9443 
-        --name=portainer 
-        --restart=always 
-        -v /var/run/docker.sock:/var/run/docker.sock 
-        -v portainer_data:/data 
-        portainer/portainer-ce:latest
-      # Logic: Run if we just updated, OR if the container isn't currently running
-      when: docker_pull.changed
+    - name: Restart updated containers
+      community.docker.docker_compose_v2:
+        project_src: "{{ item.item.path | dirname }}"
+        state: present
+        build: never
+        recreate: always
+      loop: "{{ compose_update.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+      when: item.changed
+
+    - name: Generate updated containers report
+      ansible.builtin.debug:
+        msg: >-
+          The following compose files were successfully updated with TZ={{ timezone }} and restarted:
+          {{ compose_update.results | selectattr('changed', 'equalto', true) | map(attribute='item.path') | list }}
+      when: compose_update.results | selectattr('changed', 'equalto', true) | list | length > 0
+
+    - name: Generate no-change report
+      ansible.builtin.debug:
+        msg: "No changes made. All files already contain the TZ={{ timezone }} code."
+      when: compose_update.results | selectattr('changed', 'equalto', true) | list | length == 0
