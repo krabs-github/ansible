@@ -50,7 +50,7 @@
     - name: Generate updated containers report
       ansible.builtin.debug:
         msg: >-
-          The following compose files on host [{{ inventory_hostname }}] were updated with TZ={{ timezone }} and restarted:
+          [{{ inventory_hostname }}] were updated and restarted:
           {{ compose_update.results | selectattr('changed', 'equalto', true) | map(attribute='item.path') | list }}
       when: compose_update.results | selectattr('changed', 'equalto', true) | list | length > 0
 
