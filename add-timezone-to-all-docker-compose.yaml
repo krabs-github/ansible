@@ -21,8 +21,8 @@
         src: "{{ item.path }}"
         dest: "{{ item.path }}.{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}{{ ansible_date_time.second }}.bak"
         remote_src: yes
-      # Filters the file list to drop any path containing 'ansible-semaphore'
-      loop: "{{ compose_files.files | rejectattr('path', 'search', 'ansible-semaphore') | list }}"
+      # Drops any paths containing 'ansible-semaphore' or 'nginx-proxy-manager'
+      loop: "{{ compose_files.files | rejectattr('path', 'regex', 'ansible-semaphore|nginx-proxy-manager') | list }}"
       loop_control:
         label: "{{ item.path }}"
 
@@ -32,8 +32,8 @@
         insertafter: '^[ \t]*environment:[ \t]*$'
         line: "      - TZ={{ timezone }}"
         state: present
-      # Filters the file list to drop any path containing 'ansible-semaphore'
-      loop: "{{ compose_files.files | rejectattr('path', 'search', 'ansible-semaphore') | list }}"
+      # Drops any paths containing 'ansible-semaphore' or 'nginx-proxy-manager'
+      loop: "{{ compose_files.files | rejectattr('path', 'regex', 'ansible-semaphore|nginx-proxy-manager') | list }}"
       loop_control:
         label: "{{ item.path }}"
       register: compose_update
@@ -55,8 +55,8 @@
           ----------------------------------
           {{ inventory_hostname }}
           ----------------------------------
-          {% for item in compose_update.results | selectattr('changed', 'equalto', true) -%}
-          Updated: {{ item.item.path | dirname | basename }}
+          {% for item in compose_update.results | selectattr('changed', 'equalto', true) | map(attribute='item.path') | map('dirname') | map('basename') | sort -%}
+          Updated: {{ item }}
           {% endfor %}
       when: compose_update.results | selectattr('changed', 'equalto', true) | list | length > 0
 
