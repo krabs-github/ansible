@@ -54,15 +54,15 @@
         if changed:
             with open(path, 'w') as f:
                 yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
-            sys.exit(10) # Custom return code to let Ansible know a structural change happened
+            print('STACK_CHANGED')
         "
-      register: python_update
-      failed_when: python_update.rc != 0 and python_update.rc != 10
-      changed_when: python_update.rc == 10
+      # Safely checks the stdout text loop data directly instead of its return code
+      changed_when: "'STACK_CHANGED' in compose_update.results[ansible_loop_index | default(0)].stdout | default('')"
       # Drops any paths containing 'ansible-semaphore' or 'nginx-proxy-manager'
       loop: "{{ compose_files.files | rejectattr('path', 'regex', 'ansible-semaphore|nginx-proxy-manager') | list }}"
       loop_control:
         label: "{{ item.path }}"
+        index_var: ansible_loop_index
       register: compose_update
 
     - name: Restart updated containers
