@@ -162,7 +162,9 @@
           {% else %}
           * Status:             ✅ SUCCESS
           * Packages Upgraded:  {% if hostvars[host]['apt_upgrade_result']['changed'] | default(false) %}YES{% else %}NO (System up to date){% endif %}
+          
           * Reboot Executed:    {% if hostvars[host]['reboot_required_file']['stat']['exists'] | default(false) %}YES (System restarted cleanly){% else %}NO (No restart required){% endif %}
+          
           {% endif %}
           ======================================================================
           {% endfor %}
