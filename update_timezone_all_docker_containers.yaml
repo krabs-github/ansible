@@ -139,8 +139,8 @@
           {# 1. Build a structured list of container objects #}
           {% set container_list = [] %}
           {% for run in timezone_report.results if run.skipped is not defined %}
-            {% set name = run.item.split('\t')[1] | default('Unknown') %}
-            {% set id = run.item.split('\t')[0] | default('Unknown') %}
+            {% set name = run.item.split('\t') | default('Unknown') %}
+            {% set id = run.item.split('\t') | default('Unknown') %}
             {% set time_line = run.stdout_lines | select('match', '^TIME: .*') | first | default('TIME: N/A') %}
             {% set time_val = time_line | replace('TIME: ', '') %}
             
@@ -153,10 +153,19 @@
           
           {# 2. Loop through the built list, sorting by the 'name' attribute #}
           {% for container in container_list | sort(attribute='name') %}
+          {% if 'UNCHANGED' in container.status %}
+          {# ANSI Yellow escape sequences #}
+          {% set colored_status = "\u001b[33m" ~ container.status ~ "\u001b[0m" %}
+          {% elif 'CHANGED' in container.status %}
+          {# ANSI Green escape sequences #}
+          {% set colored_status = "\u001b[32m" ~ container.status ~ "\u001b[0m" %}
+          {% else %}
+          {% set colored_status = container.status %}
+          {% endif %}
           Container Name : {{ container.name }}
           Container ID   : {{ container.id }}
           Current Time   : {{ container.time }}
-          Final Status   : {{ container.status }}
+          Final Status   : {{ colored_status }}
           ----------------------------------------------------------------------
           {% endfor %}
       when: timezone_report.results is defined
