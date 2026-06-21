@@ -1,4 +1,4 @@
 all:
   hosts:
-  proxmox-mini.krabs.me:
-  proxmox.krabs.me:
+    proxmox-mini.krabs.me:
+    proxmox.krabs.me:
