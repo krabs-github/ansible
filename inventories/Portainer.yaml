@@ -1,0 +1,3 @@
+all:
+  hosts:
+  server01.krabs.me:
