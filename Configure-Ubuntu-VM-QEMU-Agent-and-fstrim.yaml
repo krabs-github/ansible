@@ -8,6 +8,7 @@
         name: qemu-guest-agent
         state: present
         update_cache: true
+      notify: Start qemu service
 
     - name: Ensure fstrim.timer service is enabled and started
       ansible.builtin.systemd:
@@ -15,8 +16,9 @@
         enabled: true
         state: started
 
-    - name: Verify qemu-guest-agent service status
-      ansible.builtin.service:
+  handlers:
+    - name: Start qemu service
+      ansible.builtin.systemd:
         name: qemu-guest-agent
         state: started
-        enabled: true
+        enabled: false  # Crucial: Keeps systemd from throwing the install/static error
