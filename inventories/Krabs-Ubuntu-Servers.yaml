@@ -1,0 +1,8 @@
+all:
+  hosts:
+    server01.krabs.me:
+    server02.krabs.me:
+    fileserver.krabs.me:
+    server04.krabs.me:
+    server05.krabs.me:
+    server08.krabs.me:
